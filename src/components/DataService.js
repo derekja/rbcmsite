@@ -223,17 +223,26 @@ class DataService {
       const prompts = await this.fetchPrompts();
 
       // Debug information
-      console.log('Fetched images:', images);
-      console.log('Fetched prompts:', prompts);
+      console.log('Fetched images:', images.length);
+      console.log('Fetched prompts:', prompts.length);
       
       // Match images with prompts by name
       this.objects = prompts.map(prompt => {
         // Find matching image by comparing names (with normalization)
         const promptName = prompt.objectName.trim();
         const matchingImage = images.find(img => {
-          // Normalize names for comparison (remove spaces, lowercase)
-          const imgNameNormalized = img.name.toLowerCase().replace(/\s+/g, '');
-          const promptNameNormalized = promptName.toLowerCase().replace(/\s+/g, '');
+          // Normalize names for comparison (remove spaces, special chars, lowercase)
+          // Use a more aggressive normalization to handle Unicode characters
+          const normalizeString = (str) => {
+            return str.toLowerCase()
+              .normalize('NFD')                // Normalize to decomposed form
+              .replace(/[\u0300-\u036f]/g, '')  // Remove diacritics
+              .replace(/[^a-z0-9]/g, '')       // Remove non-alphanumeric
+              .trim();                          // Remove whitespace
+          };
+          
+          const imgNameNormalized = normalizeString(img.name);
+          const promptNameNormalized = normalizeString(promptName);
           
           // Try both exact match and contains match
           return imgNameNormalized === promptNameNormalized || 
