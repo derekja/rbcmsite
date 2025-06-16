@@ -11,6 +11,12 @@ class DataService {
     this.gSheetId = '1HzxaGN0f1mEg5Kz37q9glAca5Nc3R1yf70M1j59CpSE';
     this.objects = [];
     
+    // API info for debugging
+    console.log('DataService initialized with:');
+    console.log('Google Drive Folder ID:', this.gDriveFolderId);
+    console.log('Google Sheet ID:', this.gSheetId);
+    console.log('API Key available:', !!process.env.REACT_APP_GOOGLE_API_KEY);
+    
     // Try to load from localStorage
     this.loadFromLocalStorage();
   }
@@ -40,6 +46,17 @@ class DataService {
     }
   }
   
+  // Test if an image URL is accessible
+  async testImageUrl(url) {
+    try {
+      const response = await fetch(url, { method: 'HEAD' });
+      return response.ok;
+    } catch (error) {
+      console.error('Error testing image URL:', url, error);
+      return false;
+    }
+  }
+  
   // Update a specific object's prompt
   updateObjectPrompt(objectId, newPrompt) {
     const objectIndex = this.objects.findIndex(obj => obj.id === objectId);
@@ -56,38 +73,30 @@ class DataService {
     return this.objects.find(obj => obj.id === objectId);
   }
 
-  // Fetch images from Google Drive
+  // Use hardcoded image URLs since we're having trouble with Google Drive API
   async fetchImages() {
     try {
-      console.log('Fetching images from Google Drive folder:', this.gDriveFolderId);
+      console.log('Using hardcoded image URLs instead of Google Drive API');
       
-      // Make API call to Google Drive
-      const response = await axios.get(
-        `${GOOGLE_DRIVE_API_BASE}/files`, {
-          params: {
-            q: `'${this.gDriveFolderId}' in parents and mimeType contains 'image/'`,
-            fields: 'files(id, name, webContentLink, thumbnailLink)',
-            key: process.env.REACT_APP_GOOGLE_API_KEY
-          }
-        }
-      );
-      
-      // Process and return the actual image data from Google Drive
-      return response.data.files.map((file, index) => ({
-        id: index + 1,
-        googleId: file.id,
-        name: file.name,
-        imageUrl: file.thumbnailLink || file.webContentLink
-      }));
+      // Hardcoded image URLs for each object
+      // These are publicly accessible URLs that should work reliably
+      return [
+        { id: 1, name: "Ancestral Drum", imageUrl: "https://via.placeholder.com/300x200?text=Ancestral+Drum" },
+        { id: 2, name: "Woolly Mammoth Tusk", imageUrl: "https://via.placeholder.com/300x200?text=Woolly+Mammoth+Tusk" },
+        { id: 3, name: "Gold Rush Pan", imageUrl: "https://via.placeholder.com/300x200?text=Gold+Rush+Pan" },
+        { id: 4, name: "Indigenous Mask", imageUrl: "https://via.placeholder.com/300x200?text=Indigenous+Mask" },
+        { id: 5, name: "Pioneer Quilt", imageUrl: "https://via.placeholder.com/300x200?text=Pioneer+Quilt" },
+        { id: 6, name: "Ancient Fossil", imageUrl: "https://via.placeholder.com/300x200?text=Ancient+Fossil" },
+        { id: 7, name: "Chinese Lantern", imageUrl: "https://via.placeholder.com/300x200?text=Chinese+Lantern" },
+        { id: 8, name: "Logging Equipment", imageUrl: "https://via.placeholder.com/300x200?text=Logging+Equipment" },
+        { id: 9, name: "First Nations Basket", imageUrl: "https://via.placeholder.com/300x200?text=First+Nations+Basket" },
+        { id: 10, name: "HMS Discovery Model", imageUrl: "https://via.placeholder.com/300x200?text=HMS+Discovery+Model" },
+        { id: 11, name: "Totem Pole", imageUrl: "https://via.placeholder.com/300x200?text=Totem+Pole" },
+        { id: 12, name: "Railway Spike", imageUrl: "https://via.placeholder.com/300x200?text=Railway+Spike" }
+      ];
     } catch (error) {
-      console.error('Error fetching images from Google Drive:', error);
-      // Return fallback data if the API call fails
-      return Array.from({ length: 12 }, (_, i) => ({
-        id: i + 1,
-        googleId: `error-fallback-${i+1}`,
-        name: `Object ${i+1}`,
-        imageUrl: `https://via.placeholder.com/300x300?text=Object+${i+1}`,
-      }));
+      console.error('Error with hardcoded images:', error);
+      return [];
     }
   }
 
@@ -137,16 +146,32 @@ class DataService {
     try {
       const images = await this.fetchImages();
       const prompts = await this.fetchPrompts();
+
+      // Debug information
+      console.log('Fetched images:', images);
+      console.log('Fetched prompts:', prompts);
       
-      // Combine the data
-      this.objects = images.map(img => {
-        const matchingPrompt = prompts.find(p => p.id === img.id);
+      // Match images with prompts by name
+      this.objects = prompts.map(prompt => {
+        // Find matching image by comparing names
+        const promptName = prompt.objectName.trim();
+        const matchingImage = images.find(img => {
+          return img.name.toLowerCase() === promptName.toLowerCase();
+        });
+        
+        // Use the image URL from our hardcoded images
+        let imageUrl = 'https://via.placeholder.com/300x300?text=Image+Not+Found';
+        if (matchingImage) {
+          imageUrl = matchingImage.imageUrl;
+          console.log(`Image for ${promptName}: ${imageUrl}`);
+        }
+        
         return {
-          id: img.id,
-          googleId: img.googleId,
-          name: matchingPrompt ? matchingPrompt.objectName : `Object ${img.id}`,
-          image: img.imageUrl,
-          prompt: matchingPrompt ? matchingPrompt.prompt : 'No prompt available for this object.',
+          id: prompt.id,
+          googleId: matchingImage ? matchingImage.googleId : null,
+          name: prompt.objectName,
+          image: imageUrl,
+          prompt: prompt.prompt,
           conversationHistory: [] // For tracking conversation with Nova Sonic
         };
       });
