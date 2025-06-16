@@ -12,8 +12,8 @@ fi
 
 # Deploy to AWS EC2 (replace with your actual server details)
 echo "Deploying to AWS EC2..."
-EC2_HOST="user@your-ec2-instance.compute.amazonaws.com"
-SSH_KEY="~/.ssh/your-key.pem"
+EC2_HOST="ec2-user@ec2-3-81-55-10.compute-1.amazonaws.com"
+SSH_KEY="~/.ssh/rbcmsite.pem"
 
 # Create .htpasswd file for Nginx basic auth
 echo "Creating .htpasswd file..."
