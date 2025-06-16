@@ -98,7 +98,7 @@ class DataService {
       
       // Make API call to Google Sheets
       const response = await axios.get(
-        `${GOOGLE_SHEETS_API_BASE}/${this.gSheetId}/values/A1:B100`, {
+        `${GOOGLE_SHEETS_API_BASE}/${this.gSheetId}/values/A1:D100`, {
           params: {
             key: process.env.REACT_APP_GOOGLE_API_KEY
           }
@@ -110,12 +110,14 @@ class DataService {
         throw new Error('No data returned from Google Sheets');
       }
       
-      // Skip the header row if it exists
-      const startRow = values[0] && (values[0][0] === 'ID' || values[0][0] === 'Object') ? 1 : 0;
+      // Start reading from row 4 as specified and skip empty rows
+      const startRow = 3; // 0-indexed, so row 4 is index 3
       
-      // Process and return the actual prompt data from Google Sheets
-      return values.slice(startRow).map((row, index) => ({
-        id: index + 1,
+      // Filter out empty rows and process the valid data
+      return values.slice(startRow)
+        .filter(row => row && row.length >= 2 && row[0] && row[1]) // Ensure row has both name and prompt
+        .map((row, index) => ({
+        id: index + 1, // Sequential ID after filtering empty rows
         objectName: row[0],
         prompt: row[1]
       }));
