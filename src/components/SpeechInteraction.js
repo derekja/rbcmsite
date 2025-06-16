@@ -145,9 +145,9 @@ const SpeechInteraction = ({ object, novaSonicService }) => {
       <audio ref={audioRef} controls={false} className="d-none" />
       
       {/* Show text response for debugging */}
-      {responseAudio && selectedObject && selectedObject.conversationHistory && selectedObject.conversationHistory.length > 0 && (
+      {responseAudio && object && object.conversationHistory && object.conversationHistory.length > 0 && (
         <div className="mt-3 small text-muted">
-          <p>Last response: {selectedObject.conversationHistory[selectedObject.conversationHistory.length - 1].botResponse}</p>
+          <p>Last response: {object.conversationHistory[object.conversationHistory.length - 1].botResponse}</p>
         </div>
       )}
     </div>
