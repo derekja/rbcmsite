@@ -19,6 +19,36 @@ class DataService {
     
     // Try to load from localStorage
     this.loadFromLocalStorage();
+    
+    // Trigger a check for new images every time a new instance is created
+    this.checkForImageUpdates();
+  }
+  
+  // Check for new or updated images from Google Drive
+  async checkForImageUpdates() {
+    try {
+      console.log('Checking for image updates from Google Drive...');
+      
+      // Make API call to download latest images in the background
+      const response = await fetch('/api/check-image-updates', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          folderId: this.gDriveFolderId
+        })
+      });
+      
+      const result = await response.json();
+      if (result.updated) {
+        console.log('Images were updated:', result.message);
+      } else {
+        console.log('No image updates needed:', result.message);
+      }
+    } catch (error) {
+      console.error('Error checking for image updates:', error);
+    }
   }
   
   // Load data from localStorage if available
@@ -90,49 +120,51 @@ class DataService {
         const manifest = await response.json();
         console.log(`Loaded ${manifest.length} images from manifest file`);
         
+        if (manifest.length === 0) {
+          console.warn('Manifest file exists but contains no images');
+          // Return empty array, will be handled by the calling code
+          return [];
+        }
+        
         // Convert manifest to the format we need
         return manifest.map((item, index) => ({
           id: index + 1,
-          name: item.name,
-          imageUrl: item.localPath
+          name: item.name || `Object ${index + 1}`,
+          imageUrl: item.localPath || '/images/image-not-found.png'
         }));
       } catch (manifestError) {
         console.error('Error loading manifest:', manifestError);
+        console.warn('Could not load image manifest. This usually happens when the download script fails.');
+        console.warn('Make sure you have run: npm run download-images');
         
-        // If manifest loading fails, try to scan the images directory
-        console.log('Attempting to scan images directory directly...');
+        // Instead of throwing error, try to check if any images exist directly
+        console.log('Checking if any images exist directly...');
         
-        // This is a fallback that manually creates map from available image files
-        // We just need to list all image files in the /public/images directory
-        const imageFiles = [
-          "Ancestral_Drum.jpg", 
-          "Woolly_Mammoth_Tusk.jpg", 
-          "Gold_Rush_Pan.jpg", 
-          "Indigenous_Mask.jpg", 
-          "Pioneer_Quilt.jpg", 
-          "Ancient_Fossil.jpg", 
-          "Chinese_Lantern.jpg", 
-          "Logging_Equipment.jpg", 
-          "First_Nations_Basket.jpg", 
-          "HMS_Discovery_Model.jpg", 
-          "Totem_Pole.jpg", 
-          "Railway_Spike.jpg"
-        ];
+        try {
+          // Request a directory listing (this will only work if the server supports it)
+          const response = await fetch('/api/list-images');
+          if (response.ok) {
+            const imageList = await response.json();
+            if (imageList && imageList.length > 0) {
+              return imageList.map((fileName, index) => ({
+                id: index + 1,
+                name: fileName.replace(/\.[^/.]+$/, "").replace(/_/g, " "),
+                imageUrl: `/images/${fileName}`
+              }));
+            }
+          }
+        } catch (listError) {
+          console.error('Error listing images directory:', listError);
+        }
         
-        return imageFiles.map((fileName, index) => {
-          // Convert filename to name (remove extension and replace underscores with spaces)
-          const name = fileName.replace(/\.[^/.]+$/, "").replace(/_/g, " ");
-          
-          return {
-            id: index + 1,
-            name: name,
-            imageUrl: `/images/${fileName}`
-          };
-        });
+        // If all attempts fail, return empty array
+        console.warn('Could not load images. Returning empty array.');
+        return [];
       }
     } catch (error) {
       console.error('Error fetching images:', error);
-      throw error;
+      // Return empty array instead of throwing
+      return [];
     }
   }
 

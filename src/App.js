@@ -80,6 +80,17 @@ function App() {
           </div>
         ) : error ? (
           <div className="alert alert-danger">{error}</div>
+        ) : objects.length === 0 ? (
+          <div className="alert alert-warning">
+            <h4 className="alert-heading">No Images Available</h4>
+            <p>No images could be found. This might be due to:</p>
+            <ul>
+              <li>Images haven't been downloaded yet from Google Drive</li>
+              <li>There's an issue with accessing the images directory</li>
+              <li>The Google Drive folder might be empty or contain no valid images</li>
+            </ul>
+            <p>Please try refreshing the page or contact the administrator.</p>
+          </div>
         ) : (
           <Row className="g-4">
             {objects.map(object => (
