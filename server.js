@@ -11,6 +11,9 @@ app.use(cors());
 // Serve static files from the React build
 app.use(express.static(path.join(__dirname, 'build')));
 
+// Explicitly serve images from public/images
+app.use('/images', express.static(path.join(__dirname, 'public/images')));
+
 // API routes can be added here
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK' });

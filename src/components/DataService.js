@@ -73,30 +73,66 @@ class DataService {
     return this.objects.find(obj => obj.id === objectId);
   }
 
-  // Use hardcoded image URLs since we're having trouble with Google Drive API
+  // Fetch images from local manifest file (loaded from Google Drive images)
   async fetchImages() {
     try {
-      console.log('Using hardcoded image URLs instead of Google Drive API');
+      console.log('Loading images from local manifest file');
       
-      // Hardcoded image URLs for each object
-      // These are publicly accessible URLs that should work reliably
-      return [
-        { id: 1, name: "Ancestral Drum", imageUrl: "https://via.placeholder.com/300x200?text=Ancestral+Drum" },
-        { id: 2, name: "Woolly Mammoth Tusk", imageUrl: "https://via.placeholder.com/300x200?text=Woolly+Mammoth+Tusk" },
-        { id: 3, name: "Gold Rush Pan", imageUrl: "https://via.placeholder.com/300x200?text=Gold+Rush+Pan" },
-        { id: 4, name: "Indigenous Mask", imageUrl: "https://via.placeholder.com/300x200?text=Indigenous+Mask" },
-        { id: 5, name: "Pioneer Quilt", imageUrl: "https://via.placeholder.com/300x200?text=Pioneer+Quilt" },
-        { id: 6, name: "Ancient Fossil", imageUrl: "https://via.placeholder.com/300x200?text=Ancient+Fossil" },
-        { id: 7, name: "Chinese Lantern", imageUrl: "https://via.placeholder.com/300x200?text=Chinese+Lantern" },
-        { id: 8, name: "Logging Equipment", imageUrl: "https://via.placeholder.com/300x200?text=Logging+Equipment" },
-        { id: 9, name: "First Nations Basket", imageUrl: "https://via.placeholder.com/300x200?text=First+Nations+Basket" },
-        { id: 10, name: "HMS Discovery Model", imageUrl: "https://via.placeholder.com/300x200?text=HMS+Discovery+Model" },
-        { id: 11, name: "Totem Pole", imageUrl: "https://via.placeholder.com/300x200?text=Totem+Pole" },
-        { id: 12, name: "Railway Spike", imageUrl: "https://via.placeholder.com/300x200?text=Railway+Spike" }
-      ];
+      try {
+        // Try to load image manifest created by downloadImages.js
+        const manifestPath = '/images/manifest.json';
+        const response = await fetch(manifestPath);
+        
+        if (!response.ok) {
+          throw new Error(`Failed to load image manifest: ${response.status} ${response.statusText}`);
+        }
+        
+        const manifest = await response.json();
+        console.log(`Loaded ${manifest.length} images from manifest file`);
+        
+        // Convert manifest to the format we need
+        return manifest.map((item, index) => ({
+          id: index + 1,
+          name: item.name,
+          imageUrl: item.localPath
+        }));
+      } catch (manifestError) {
+        console.error('Error loading manifest:', manifestError);
+        
+        // If manifest loading fails, try to scan the images directory
+        console.log('Attempting to scan images directory directly...');
+        
+        // This is a fallback that manually creates map from available image files
+        // We just need to list all image files in the /public/images directory
+        const imageFiles = [
+          "Ancestral_Drum.jpg", 
+          "Woolly_Mammoth_Tusk.jpg", 
+          "Gold_Rush_Pan.jpg", 
+          "Indigenous_Mask.jpg", 
+          "Pioneer_Quilt.jpg", 
+          "Ancient_Fossil.jpg", 
+          "Chinese_Lantern.jpg", 
+          "Logging_Equipment.jpg", 
+          "First_Nations_Basket.jpg", 
+          "HMS_Discovery_Model.jpg", 
+          "Totem_Pole.jpg", 
+          "Railway_Spike.jpg"
+        ];
+        
+        return imageFiles.map((fileName, index) => {
+          // Convert filename to name (remove extension and replace underscores with spaces)
+          const name = fileName.replace(/\.[^/.]+$/, "").replace(/_/g, " ");
+          
+          return {
+            id: index + 1,
+            name: name,
+            imageUrl: `/images/${fileName}`
+          };
+        });
+      }
     } catch (error) {
-      console.error('Error with hardcoded images:', error);
-      return [];
+      console.error('Error fetching images:', error);
+      throw error;
     }
   }
 
@@ -153,17 +189,26 @@ class DataService {
       
       // Match images with prompts by name
       this.objects = prompts.map(prompt => {
-        // Find matching image by comparing names
+        // Find matching image by comparing names (with normalization)
         const promptName = prompt.objectName.trim();
         const matchingImage = images.find(img => {
-          return img.name.toLowerCase() === promptName.toLowerCase();
+          // Normalize names for comparison (remove spaces, lowercase)
+          const imgNameNormalized = img.name.toLowerCase().replace(/\s+/g, '');
+          const promptNameNormalized = promptName.toLowerCase().replace(/\s+/g, '');
+          
+          // Try both exact match and contains match
+          return imgNameNormalized === promptNameNormalized || 
+                 imgNameNormalized.includes(promptNameNormalized) || 
+                 promptNameNormalized.includes(imgNameNormalized);
         });
         
-        // Use the image URL from our hardcoded images
-        let imageUrl = 'https://via.placeholder.com/300x300?text=Image+Not+Found';
+        // Use the image URL from our downloaded images
+        let imageUrl = '/images/image-not-found.jpg'; // This will show a 404 if not available
         if (matchingImage) {
           imageUrl = matchingImage.imageUrl;
-          console.log(`Image for ${promptName}: ${imageUrl}`);
+          console.log(`Found image match for ${promptName}: ${imageUrl}`);
+        } else {
+          console.warn(`No matching image found for: ${promptName}`);
         }
         
         return {
