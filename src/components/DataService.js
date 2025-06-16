@@ -81,7 +81,13 @@ class DataService {
       }));
     } catch (error) {
       console.error('Error fetching images from Google Drive:', error);
-      throw error;
+      // Return fallback data if the API call fails
+      return Array.from({ length: 12 }, (_, i) => ({
+        id: i + 1,
+        googleId: `error-fallback-${i+1}`,
+        name: `Object ${i+1}`,
+        imageUrl: `https://via.placeholder.com/300x300?text=Object+${i+1}`,
+      }));
     }
   }
 
@@ -99,9 +105,13 @@ class DataService {
         }
       );
       
-      const values = response.data.values;
+      const values = response.data.values || [];
+      if (!values || values.length === 0) {
+        throw new Error('No data returned from Google Sheets');
+      }
+      
       // Skip the header row if it exists
-      const startRow = values[0][0] === 'ID' || values[0][0] === 'Object' ? 1 : 0;
+      const startRow = values[0] && (values[0][0] === 'ID' || values[0][0] === 'Object') ? 1 : 0;
       
       // Process and return the actual prompt data from Google Sheets
       return values.slice(startRow).map((row, index) => ({
@@ -111,7 +121,12 @@ class DataService {
       }));
     } catch (error) {
       console.error('Error fetching prompts from Google Sheets:', error);
-      throw error;
+      // Return fallback data if the API call fails
+      return Array.from({ length: 12 }, (_, i) => ({
+        id: i + 1,
+        objectName: `Object ${i+1}`,
+        prompt: `This is a sample prompt for object ${i+1}. Ask me about this object's history and significance.`
+      }));
     }
   }
 

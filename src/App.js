@@ -83,12 +83,12 @@ function App() {
             {objects.map(object => (
               <Col key={object.id} xs={12} sm={6} md={4} lg={3}>
                 <Card className="h-100">
-                  <Card.Img variant="top" src={object.image} alt={`Object ${object.id}`} />
+                  <Card.Img variant="top" src={object.image || 'https://via.placeholder.com/300x300?text=Image+Not+Available'} alt={`${object.name || `Object ${object.id}`}`} />
                   <Card.Body className="d-flex flex-column">
                     <Card.Title>{object.name}</Card.Title>
                     <Card.Text className="mb-2">
                       {/* Show the first 50 characters of the prompt as a hint */}
-                      {object.prompt.substring(0, 50)}...
+                      {object.prompt ? `${object.prompt.substring(0, 50)}...` : 'No prompt available'}
                     </Card.Text>
                     <div className="mt-auto d-flex justify-content-between">
                       {selectedObject && selectedObject.id === object.id ? (
