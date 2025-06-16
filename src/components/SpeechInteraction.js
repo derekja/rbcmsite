@@ -65,10 +65,10 @@ const SpeechInteraction = ({ object, novaSonicService }) => {
   // Process audio with Nova Sonic
   const processAudio = async (audioBlob) => {
     try {
-      // Call Nova Sonic service
+      // Call Nova Sonic service with the prompt and recorded audio
       const response = await novaSonicService.startConversation(object.prompt, audioBlob);
       
-      // Handle response - in a real implementation, this would be audio data
+      // Set the audio response to play
       setResponseAudio(response.audioResponse);
       
       // Update conversation history
@@ -80,8 +80,16 @@ const SpeechInteraction = ({ object, novaSonicService }) => {
         botAudio: response.audioResponse
       });
       
-      // In a real app, you would update the parent component with this history
-      console.log('Updated conversation history:', updatedHistory);
+      // Add the conversation to the object's history
+      object.conversationHistory = updatedHistory;
+      
+      // Play the audio response automatically
+      if (audioRef.current) {
+        audioRef.current.src = response.audioResponse;
+        audioRef.current.onloadedmetadata = () => {
+          audioRef.current.play().catch(e => console.error('Error playing audio:', e));
+        };
+      }
       
       setIsProcessing(false);
     } catch (err) {
@@ -133,8 +141,14 @@ const SpeechInteraction = ({ object, novaSonicService }) => {
         </Button>
       )}
       
-      {responseAudio && (
-        <audio ref={audioRef} src={responseAudio} className="d-none" />
+      {/* Audio player for response */}
+      <audio ref={audioRef} controls={false} className="d-none" />
+      
+      {/* Show text response for debugging */}
+      {responseAudio && selectedObject && selectedObject.conversationHistory && selectedObject.conversationHistory.length > 0 && (
+        <div className="mt-3 small text-muted">
+          <p>Last response: {selectedObject.conversationHistory[selectedObject.conversationHistory.length - 1].botResponse}</p>
+        </div>
       )}
     </div>
   );

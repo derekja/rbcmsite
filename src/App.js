@@ -48,10 +48,15 @@ function App() {
 
   const handleSavePrompt = () => {
     if (selectedObject) {
+      // Update the prompt in the local state
       const updatedObjects = objects.map(obj => 
         obj.id === selectedObject.id ? { ...obj, prompt: editedPrompt } : obj
       );
       setObjects(updatedObjects);
+      
+      // Update the prompt in the data service for persistence
+      dataService.updateObjectPrompt(selectedObject.id, editedPrompt);
+      
       setShowPromptModal(false);
     }
   };
@@ -80,6 +85,7 @@ function App() {
                 <Card className="h-100">
                   <Card.Img variant="top" src={object.image} alt={`Object ${object.id}`} />
                   <Card.Body className="d-flex flex-column">
+                    <Card.Title>{object.name}</Card.Title>
                     <Card.Text className="mb-2">
                       {/* Show the first 50 characters of the prompt as a hint */}
                       {object.prompt.substring(0, 50)}...
