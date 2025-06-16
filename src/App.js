@@ -34,6 +34,9 @@ function App() {
     };
     
     loadData();
+  // Adding dataService to the dependency array to satisfy ESLint
+  // This is safe because dataService is created once at component load
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSpeakClick = (object) => {

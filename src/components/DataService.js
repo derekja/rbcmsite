@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // Constants for Google API endpoints
-const GOOGLE_DRIVE_API_BASE = 'https://www.googleapis.com/drive/v3';
+// Only using the Sheets API base in this file
 const GOOGLE_SHEETS_API_BASE = 'https://sheets.googleapis.com/v4/spreadsheets';
 
 // This service will handle fetching images and prompts from Google Drive and Sheets
