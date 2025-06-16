@@ -343,16 +343,16 @@ function createManifest(files) {
   
   // Generate manifest entries with sanitized filenames
   const manifest = validFiles.map(file => {
-    // Sanitize filename (same logic as in downloadFile)
+    // Sanitize filename for the actual file (same logic as in downloadFile)
     const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9_.-]/g, '_');
     
-    // Remove file extension for the name field (used for matching)
-    const nameWithoutExtension = sanitizedFileName.replace(/\.[^/.]+$/, "");
+    // Get the original name without file extension for display
+    const originalNameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
     
     return {
       id: file.id,
-      name: nameWithoutExtension,
-      localPath: `/images/${sanitizedFileName}`,
+      name: originalNameWithoutExt, // Keep original name with spaces for display
+      localPath: `/images/${sanitizedFileName}`, // Use sanitized name for file path
       mimeType: file.mimeType || 'unknown'
     };
   });

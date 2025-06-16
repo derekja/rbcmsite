@@ -127,11 +127,18 @@ class DataService {
         }
         
         // Convert manifest to the format we need
-        return manifest.map((item, index) => ({
-          id: index + 1,
-          name: item.name || `Object ${index + 1}`,
-          imageUrl: item.localPath || '/images/image-not-found.png'
-        }));
+        return manifest.map((item, index) => {
+          // The manifest contains sanitized filenames (with underscores)
+          // But display names should have spaces for better readability
+          const displayName = item.name ? item.name.replace(/_/g, ' ') : `Object ${index + 1}`;
+          
+          // Keep the original localPath for the image URL since that's the actual file path
+          return {
+            id: index + 1,
+            name: displayName,
+            imageUrl: item.localPath || '/images/image-not-found.png'
+          };
+        });
       } catch (manifestError) {
         console.error('Error loading manifest:', manifestError);
         console.warn('Could not load image manifest. This usually happens when the download script fails.');

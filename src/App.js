@@ -96,18 +96,20 @@ function App() {
             {objects.map(object => (
               <Col key={object.id} xs={12} sm={6} md={4} lg={3}>
                 <Card className="h-100">
-                  <Card.Img 
-                    variant="top" 
-                    src={object.image} 
-                    alt={object.name}
-                  />
+                  <div className="image-container">
+                    <Card.Img 
+                      variant="top" 
+                      src={object.image} 
+                      alt={object.name}
+                    />
+                  </div>
                   <Card.Body className="d-flex flex-column">
-                    <Card.Title>{object.name}</Card.Title>
-                    <Card.Text className="mb-2">
-                      {/* Show the first 50 characters of the prompt as a hint */}
-                      {object.prompt ? `${object.prompt.substring(0, 50)}...` : 'No prompt available'}
+                    <Card.Title className="text-center">{object.name}</Card.Title>
+                    <Card.Text className="mb-3 small text-muted">
+                      {/* Show the first 60 characters of the prompt as a hint */}
+                      {object.prompt ? `${object.prompt.substring(0, 60)}...` : 'No prompt available'}
                     </Card.Text>
-                    <div className="mt-auto d-flex justify-content-between">
+                    <div className="mt-auto d-flex justify-content-center gap-2">
                       {selectedObject && selectedObject.id === object.id ? (
                         <SpeechInteraction 
                           object={object} 
