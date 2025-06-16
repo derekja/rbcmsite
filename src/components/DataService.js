@@ -12,42 +12,44 @@ class DataService {
     this.objects = [];
     
     // API info for debugging
-    console.log('DataService initialized with:');
-    console.log('Google Drive Folder ID:', this.gDriveFolderId);
-    console.log('Google Sheet ID:', this.gSheetId);
-    console.log('API Key available:', !!process.env.REACT_APP_GOOGLE_API_KEY);
+    console.log('DataService initialized');
     
     // Try to load from localStorage
     this.loadFromLocalStorage();
     
-    // Trigger a check for new images every time a new instance is created
+    // Just check if the manifest exists rather than trying to update it
+    // This is more for validation than actual updates
     this.checkForImageUpdates();
   }
   
-  // Check for new or updated images from Google Drive
+  // Check if manifest.json exists and has been updated recently
   async checkForImageUpdates() {
     try {
-      console.log('Checking for image updates from Google Drive...');
+      console.log('Checking for image manifest...');
       
-      // Make API call to download latest images in the background
-      const response = await fetch('/api/check-image-updates', {
-        method: 'POST',
+      // Just check if the manifest exists
+      const manifestResponse = await fetch('/images/manifest.json', {
+        method: 'GET',
         headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          folderId: this.gDriveFolderId
-        })
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
       });
       
-      const result = await response.json();
-      if (result.updated) {
-        console.log('Images were updated:', result.message);
-      } else {
-        console.log('No image updates needed:', result.message);
+      if (!manifestResponse.ok) {
+        console.warn('Image manifest not found or not accessible');
+        return;
+      }
+      
+      try {
+        const manifest = await manifestResponse.json();
+        console.log(`Manifest contains ${manifest.length} images`);
+      } catch (parseError) {
+        console.warn('Could not parse manifest JSON:', parseError.message);
       }
     } catch (error) {
-      console.error('Error checking for image updates:', error);
+      // Just log the error but don't disrupt the app flow
+      console.warn('Could not check for image updates:', error.message);
     }
   }
   
@@ -111,13 +113,27 @@ class DataService {
       try {
         // Try to load image manifest created by downloadImages.js
         const manifestPath = '/images/manifest.json';
-        const response = await fetch(manifestPath);
+        const response = await fetch(manifestPath, {
+          // Prevent caching issues
+          cache: 'no-store',
+          headers: {
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache'
+          }
+        });
         
         if (!response.ok) {
           throw new Error(`Failed to load image manifest: ${response.status} ${response.statusText}`);
         }
         
-        const manifest = await response.json();
+        // Use a try/catch specifically for JSON parsing
+        let manifest;
+        try {
+          manifest = await response.json();
+        } catch (jsonError) {
+          console.error('Error parsing manifest JSON:', jsonError);
+          throw new Error('Invalid manifest format');
+        }
         console.log(`Loaded ${manifest.length} images from manifest file`);
         
         if (manifest.length === 0) {

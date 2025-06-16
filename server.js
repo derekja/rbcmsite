@@ -56,36 +56,8 @@ app.get('/api/list-images', (req, res) => {
   }
 });
 
-// API endpoint to check for new images and download them if needed
-app.post('/api/check-image-updates', (req, res) => {
-  console.log('Received request to check for image updates');
-  
-  // Run the download script in the background
-  const scriptPath = path.join(__dirname, 'scripts', 'downloadImages.js');
-  
-  // Check if the script exists
-  if (!fs.existsSync(scriptPath)) {
-    return res.status(404).json({ updated: false, message: 'Download script not found' });
-  }
-  
-  // Execute the download script
-  exec(`node ${scriptPath} --check-only`, (error, stdout, stderr) => {
-    if (error) {
-      console.error(`Error executing download script: ${error.message}`);
-      console.error(`stderr: ${stderr}`);
-      return res.status(500).json({ updated: false, message: 'Error checking for updates' });
-    }
-    
-    console.log(`Download script output: ${stdout}`);
-    
-    // Check if any updates were made
-    if (stdout.includes('Downloaded') || stdout.includes('Updated')) {
-      return res.json({ updated: true, message: stdout });
-    } else {
-      return res.json({ updated: false, message: 'No updates needed' });
-    }
-  });
-});
+// Images are handled by the download script during build/start
+// so we don't need a separate endpoint for checking updates
 
 // Catch-all handler to serve React app
 app.get('*', (req, res) => {
