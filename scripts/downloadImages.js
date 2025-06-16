@@ -258,7 +258,8 @@ async function downloadFile(fileId, fileName, modifiedTime) {
         alt: 'media'
       }, { responseType: 'arraybuffer' });
       
-      const responseData = response.data;
+      // Convert ArrayBuffer to Buffer if needed
+      const responseData = Buffer.from(response.data);
       
       // Validate that the downloaded data is actually an image
       const isValidImage = await validateImageData(responseData, fileName);
@@ -301,8 +302,11 @@ async function downloadFile(fileId, fileName, modifiedTime) {
         }
       });
       
+      // Convert response data to Buffer if needed
+      const responseBuffer = Buffer.from(response.data);
+      
       // Validate that the downloaded data is actually an image
-      const isValidImage = await validateImageData(response.data, fileName);
+      const isValidImage = await validateImageData(responseBuffer, fileName);
       if (!isValidImage) {
         console.error(`Downloaded file ${fileName} failed image validation - skipping`);
         return null;
@@ -310,7 +314,7 @@ async function downloadFile(fileId, fileName, modifiedTime) {
       
       // Save file to disk
       const filePath = path.join(__dirname, '../public/images', fileName);
-      fs.writeFileSync(filePath, response.data);
+      fs.writeFileSync(filePath, responseBuffer);
       
       // Update metadata
       const metadata = readMetadata();
