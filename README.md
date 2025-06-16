@@ -27,6 +27,11 @@ This application allows users to interact with the objects from the RBCM collect
    npm run build
    ```
 
+4. Start the Express server (after building):
+   ```
+   npm run server
+   ```
+
 ## AWS Configuration
 
 This application uses AWS Bedrock's Nova Sonic model for speech-to-speech interaction. For development:
