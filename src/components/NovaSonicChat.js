@@ -46,7 +46,11 @@ const NovaSonicChat = ({ objectPrompt }) => {
     audioPlayerRef.current.start();
     
     // Set up WebSocket connection
-    socketRef.current = io('http://localhost:3001');
+    // Use the same host and port that the page is served from
+    const socketUrl = window.location.hostname === 'localhost' 
+      ? 'http://localhost:3001' 
+      : window.location.origin;
+    socketRef.current = io(socketUrl);
     
     // Event handlers
     socketRef.current.on('connect', () => {
@@ -113,12 +117,15 @@ const NovaSonicChat = ({ objectPrompt }) => {
     
     // Handle audio output
     socketRef.current.on('audioOutput', (data) => {
-      if (data.content) {
+      if (data.content && data.content.length > 0) {
         try {
+          console.log('Received audio content of length:', data.content.length);
           audioPlayerRef.current.playBase64Audio(data.content);
         } catch (error) {
           console.error('Error playing audio:', error);
         }
+      } else {
+        console.log('Received empty audio content, skipping playback');
       }
     });
     

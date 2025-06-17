@@ -7,6 +7,7 @@ const socketIo = require('socket.io');
 const { exec } = require('child_process');
 const AWS = require('aws-sdk');
 const { BedrockRuntimeClient, InvokeModelWithBidirectionalStreamCommand } = require('@aws-sdk/client-bedrock-runtime');
+const { TextEncoder, TextDecoder } = require('util');
 
 const app = express();
 const server = http.createServer(app);
@@ -157,8 +158,6 @@ io.on('connection', (socket) => {
     systemPrompt: "",
     isStreaming: false,
     responseStream: null,
-    audioBuffer: [],
-    transcribedText: "",
     sessionInitialized: false
   });
 
@@ -177,6 +176,16 @@ io.on('connection', (socket) => {
     const session = activeSessions.get(socket.id);
     if (session) {
       session.sessionInitialized = true;
+      
+      // If there's an existing stream, close it
+      if (session.responseStream) {
+        try {
+          session.responseStream.cancelStream();
+          session.responseStream = null;
+        } catch (e) {
+          console.error('Error resetting stream:', e);
+        }
+      }
     }
   });
 
@@ -186,7 +195,6 @@ io.on('connection', (socket) => {
     const session = activeSessions.get(socket.id);
     if (session) {
       session.isStreaming = true;
-      session.audioBuffer = [];
     }
   });
 
@@ -196,11 +204,101 @@ io.on('connection', (socket) => {
     if (!session || !session.isStreaming) return;
 
     try {
-      // Accumulate audio data
-      session.audioBuffer.push(audioBase64);
+      // Stream directly to AWS Nova Sonic
+      if (!session.responseStream) {
+        // Initialize the bidirectional stream with Nova Sonic on first audio chunk
+        try {
+          // Start a bidirectional stream with AWS Bedrock Nova Sonic
+          const systemPrompt = session.systemPrompt || "You are Nova Sonic, an AI assistant that provides information about objects at the Royal BC Museum.";
+          
+          const command = new InvokeModelWithBidirectionalStreamCommand({
+            modelId: 'amazon.nova-sonic-v1:0',
+            contentType: 'application/json',
+            accept: 'application/json'
+          });
+          
+          // Send system prompt
+          const systemMessage = {
+            contentType: 'text/plain',
+            role: 'system',
+            content: systemPrompt
+          };
+          
+          // Create the bidirectional stream
+          session.responseStream = await bedrockRuntime.send(command);
+          
+          // Send system prompt first
+          const systemBytes = new TextEncoder().encode(JSON.stringify(systemMessage));
+          await session.responseStream.send({ inputPayloadPart: { bytes: systemBytes } });
+          
+          // Handle responses from Nova Sonic
+          for await (const chunk of session.responseStream) {
+            if (chunk.output?.payloadPart?.bytes) {
+              const outputPart = JSON.parse(new TextDecoder().decode(chunk.output.payloadPart.bytes));
+              
+              // Handle different output types from Nova Sonic
+              if (outputPart.contentType === 'text/plain' && outputPart.role === 'user') {
+                // User transcription received
+                socket.emit('contentStart', {
+                  type: 'TEXT',
+                  role: 'USER'
+                });
+                
+                socket.emit('textOutput', {
+                  role: 'USER',
+                  content: outputPart.content
+                });
+                
+                socket.emit('contentEnd', {
+                  type: 'TEXT',
+                  role: 'USER',
+                  stopReason: 'END_TURN'
+                });
+              } else if (outputPart.contentType === 'text/plain' && outputPart.role === 'assistant') {
+                // Assistant response text
+                socket.emit('contentStart', {
+                  type: 'TEXT',
+                  role: 'ASSISTANT'
+                });
+                
+                socket.emit('textOutput', {
+                  role: 'ASSISTANT',
+                  content: outputPart.content
+                });
+                
+                socket.emit('contentEnd', {
+                  type: 'TEXT',
+                  role: 'ASSISTANT',
+                  stopReason: 'END_TURN'
+                });
+              } else if (outputPart.contentType === 'audio/basic') {
+                // Audio response
+                socket.emit('audioOutput', {
+                  content: outputPart.content
+                });
+              } else if (outputPart.contentType === 'completion') {
+                // Stream completion
+                socket.emit('streamComplete');
+              }
+            }
+          }
+        } catch (streamError) {
+          console.error('Error creating Nova Sonic stream:', streamError);
+          socket.emit('error', { message: 'Failed to connect to Nova Sonic' });
+          return;
+        }
+      }
       
-      // Here we would normally stream to AWS Nova Sonic
-      // For now, we'll use mock responses to demonstrate the flow
+      // Send audio chunk to the stream
+      if (session.responseStream) {
+        const inputPayload = {
+          contentType: 'audio/basic',
+          content: audioBase64
+        };
+        
+        const bytes = new TextEncoder().encode(JSON.stringify(inputPayload));
+        await session.responseStream.send({ inputPayloadPart: { bytes } });
+      }
     } catch (error) {
       console.error('Error processing audio input:', error);
       socket.emit('error', { message: 'Audio processing error' });
@@ -216,45 +314,28 @@ io.on('connection', (socket) => {
     session.isStreaming = false;
     
     try {
-      // Mock content start for user transcription 
-      socket.emit('contentStart', {
-        type: 'TEXT',
-        role: 'USER'
-      });
-      
-      // Mock text output - in production this would be the transcribed audio
-      const mockUserText = "This is a mock user transcription";
-      socket.emit('textOutput', {
-        role: 'USER',
-        content: mockUserText
-      });
-      
-      // Mock content end for user
-      socket.emit('contentEnd', {
-        type: 'TEXT',
-        role: 'USER',
-        stopReason: 'END_TURN'
-      });
-      
-      // Mock assistant response start
-      socket.emit('contentStart', {
-        type: 'TEXT',
-        role: 'ASSISTANT'
-      });
-      
-      // Mock text output from assistant
-      const mockResponse = "This is a mock response from the assistant about the RBCM object.";
-      socket.emit('textOutput', {
-        role: 'ASSISTANT',
-        content: mockResponse
-      });
-      
-      // Generate mock audio response
-      const mockAudioWAV = 'UklGRpQMAABXQVZFZm10IBAAAAABAAEARKwAAESsAAABAAgAZGF0YXAMAAAAEhIsNEteaXqElaOxvcrY5O/8/vz57unf0MS2p5iKem9dTDwpFwT16uDVy8C2rKKZkIh/d29nYFpUTkpHQ0A/PkA/QURITVJYXmRqcXd9g4iOk5icn6KlqKqsrq6vr66tqqijnaGXjIJ4b2VaT0Q5LSEWCv3x5t3Uz8rFwb26uLW0srGwsLCxsrS2uLu9wMPGyczQ09bb3+Lm6ezv8vX3+vv9/v7+/Pv59/Xz8e/t6+rn5uTj4uHh4eLj4+Tl5+jq6+3u8PHz9PX29/j5+vr6+vr5+fj39/b29fX19fT09PT09PX19fb2+Pj5+vv8/f3+/v7+/v38+/r5+Pf29PT08/Py8vHx8fHx8fHx8vLz8/T19fb3+Pn6+/z9/v7+/v38+/r5+Pf29fTz8vHw7+7t7ezs6+vr6+vr6+zs7e3u7/Dx8vP09fb3+Pn6+/z8/f3+';
-      
-      socket.emit('audioOutput', {
-        content: mockAudioWAV
-      });
+      // Send stopGenerating signal to the bidirectional stream
+      if (session.responseStream) {
+        try {
+          // Send a special message to Nova Sonic to stop generating
+          const stopSignal = {
+            contentType: 'control',
+            stopGenerating: true
+          };
+          
+          const bytes = new TextEncoder().encode(JSON.stringify(stopSignal));
+          await session.responseStream.send({ inputPayloadPart: { bytes } });
+          
+          // Note: We don't need to emit stream complete or other events here
+          // as the bidirectional stream's event handlers will take care of that
+        } catch (stopError) {
+          console.error('Error sending stop signal:', stopError);
+        }
+      }
+    } catch (error) {
+      console.error('Error stopping audio:', error);
+      socket.emit('error', { message: 'Error stopping audio processing' });
+    }
       
       // Mock content end for assistant
       socket.emit('contentEnd', {
@@ -280,7 +361,8 @@ io.on('connection', (socket) => {
     const session = activeSessions.get(socket.id);
     if (session && session.responseStream) {
       try {
-        // Close any active streams
+        // Close the bidirectional stream
+        session.responseStream.cancelStream();
       } catch (e) {
         console.error('Error closing stream:', e);
       }
