@@ -66,19 +66,47 @@ class NovaSonicService {
         throw new Error('Invalid response from server proxy');
       }
       
+      // Determine audio type by checking first few characters
+      const firstChunk = audioChunks[0] || '';
+      let audioType = 'audio/mp3';  // Default type
+      
+      // Check the header signature of the first chunk (base64)
+      const headerCheck = firstChunk.substring(0, 10);
+      console.log('Audio header signature:', headerCheck);
+      
+      if (headerCheck.startsWith('SUQz')) {
+        audioType = 'audio/mpeg';  // ID3 - MP3 format
+        console.log('Detected MP3 format audio');
+      } else if (headerCheck.startsWith('UklG')) {
+        audioType = 'audio/wav';   // RIFF - WAV format
+        console.log('Detected WAV format audio');
+      } else {
+        console.log('Unknown audio format, using MP3 as default');
+      }
+      
       // Combine all audio chunks into a single audio blob
       // Convert base64 strings to binary data for Blob
       const audioData = audioChunks.map(chunk => {
-        // Decode base64 string to binary data
-        const binaryString = window.atob(chunk);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
+        try {
+          // Decode base64 string to binary data
+          const binaryString = window.atob(chunk);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          return bytes.buffer;
+        } catch (error) {
+          console.error('Error decoding base64 audio chunk:', error);
+          return new ArrayBuffer(0); // Return empty buffer for invalid chunks
         }
-        return bytes.buffer;
-      });
+      }).filter(buffer => buffer.byteLength > 0); // Filter out empty buffers
       
-      const audioBlob = new Blob(audioData, { type: 'audio/mp3' });
+      if (audioData.length === 0) {
+        throw new Error('No valid audio data received');
+      }
+      
+      console.log('Creating audio blob of type:', audioType, 'with', audioData.length, 'chunks');
+      const audioBlob = new Blob(audioData, { type: audioType });
       const audioUrl = URL.createObjectURL(audioBlob);
       
       // Add this exchange to the conversation context
