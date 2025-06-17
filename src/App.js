@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { Container, Row, Col, Card, Button, Modal, Form } from 'react-bootstrap';
 import './App.css';
 import DataService from './components/DataService';
-import NovaSonicService from './components/NovaSonicService';
 import SpeechInteraction from './components/SpeechInteraction';
 
 function App() {
@@ -14,9 +13,8 @@ function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   
-  // Initialize services
+  // Initialize data service
   const dataService = new DataService();
-  const novaSonicService = new NovaSonicService('us-east-1');
   
   // Fetch images and prompts from Google sources
   useEffect(() => {
@@ -115,8 +113,7 @@ function App() {
                     <div className="mt-auto d-flex justify-content-center gap-2">
                       {selectedObject && selectedObject.id === object.id ? (
                         <SpeechInteraction 
-                          object={object} 
-                          novaSonicService={novaSonicService} 
+                          object={object}
                         />
                       ) : (
                         <Button 

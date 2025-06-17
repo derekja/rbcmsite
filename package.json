@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.785",
+    "@aws-sdk/credential-providers": "^3.782",
+    "@smithy/node-http-handler": "^4.0.4",
+    "@smithy/types": "^4.1.0",
     "@testing-library/jest-dom": "^5.17.0",
     "@testing-library/react": "^13.4.0",
     "@testing-library/user-event": "^13.5.0",
@@ -13,20 +17,29 @@
     "dotenv": "^16.5.0",
     "express": "^4.18.2",
     "googleapis": "^128.0.0",
+    "http-proxy-middleware": "^2.0.6",
     "react": "^18.2.0",
+    "react-app-rewired": "^2.2.1",
     "react-bootstrap": "^2.7.0",
     "react-dom": "^18.2.0",
     "react-scripts": "5.0.1",
+    "rxjs": "^7.8.2",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
+    "uuid": "^11.1.0",
     "web-vitals": "^2.1.4"
   },
   "scripts": {
-    "start": "react-scripts start",
-    "build": "node scripts/downloadImages.js && react-scripts build",
-    "test": "react-scripts test",
+    "start": "FAST_REFRESH=false WDS_SOCKET_PORT=0 react-app-rewired start",
+    "build": "node scripts/downloadImages.js && react-app-rewired build",
+    "test": "react-app-rewired test",
     "eject": "react-scripts eject",
     "server": "node server.js",
-    "dev": "npm run download-images && react-scripts start",
-    "download-images": "node scripts/downloadImages.js"
+    "dev": "bash ./dev-start.sh",
+    "dev:frontend": "FAST_REFRESH=false WDS_SOCKET_PORT=0 PORT=3001 react-app-rewired start",
+    "dev:server": "node server.js",
+    "download-images": "node scripts/downloadImages.js",
+    "prod": "npm run build && npm run server"
   },
   "eslintConfig": {
     "extends": [

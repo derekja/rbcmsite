@@ -1,3 +1,6 @@
+// Import WebSocket disabler first to prevent webpack-dev-server WebSocket connections
+import './disableWDSSocket';
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
