@@ -16,7 +16,7 @@ function App() {
   
   // Initialize services
   const dataService = new DataService();
-  const novaSonicService = new NovaSonicService('us-east-1');
+  const novaSonicService = new NovaSonicService(); // No region needed for proxy mode
   
   // Fetch images and prompts from Google sources
   useEffect(() => {
