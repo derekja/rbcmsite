@@ -15,6 +15,9 @@ console.log('AWS Configuration:');
 console.log('AWS_REGION:', process.env.AWS_REGION);
 console.log('AWS_DEFAULT_REGION:', process.env.AWS_DEFAULT_REGION);
 console.log('AWS_PROFILE:', process.env.AWS_PROFILE);
+console.log('AWS_ACCESS_KEY_ID:', process.env.AWS_ACCESS_KEY_ID ? '****' + process.env.AWS_ACCESS_KEY_ID.substr(-4) : 'not set');
+console.log('AWS_SECRET_ACCESS_KEY:', process.env.AWS_SECRET_ACCESS_KEY ? 'exists' : 'not set');
+console.log('AWS_SESSION_TOKEN:', process.env.AWS_SESSION_TOKEN ? 'exists' : 'not set');
 
 const app = express();
 const server = http.createServer(app);
@@ -31,9 +34,13 @@ const io = new Server(server, {
 });
 
 const PORT = process.env.PORT || 3000;
+// Check for AWS credentials in environment variables first, then fallback to profile
 const AWS_PROFILE_NAME = process.env.AWS_PROFILE || 'bedrock-test';
+const HAS_ENV_CREDENTIALS = !!(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY);
 // Force us-east-1 region for Bedrock Nova Sonic model availability
 const AWS_REGION = 'us-east-1';
+
+console.log('Using credentials strategy:', HAS_ENV_CREDENTIALS ? 'Environment Variables' : `AWS Profile (${AWS_PROFILE_NAME})`);
 
 // Enable CORS for development
 app.use(cors());
@@ -125,6 +132,42 @@ try {
   console.log('Initializing AWS Bedrock client...');
   console.log(`AWS Region: ${AWS_REGION}`);
   console.log(`AWS Profile: ${AWS_PROFILE_NAME}`);
+  console.log('FORCING us-east-1 for Nova Sonic regardless of environment settings');
+  
+  // Get credentials based on what's available
+  let credentials;
+  
+  if (HAS_ENV_CREDENTIALS) {
+    console.log('Using AWS credentials from environment variables');
+    // When using environment variables, credentials are automatically loaded
+    credentials = undefined; // Let AWS SDK use env vars automatically
+  } else {
+    console.log(`Retrieving credentials from profile: ${AWS_PROFILE_NAME}`);
+    credentials = fromIni({ profile: AWS_PROFILE_NAME });
+    
+    // Verify the credentials can be resolved
+    console.log('Verifying credentials from profile...');
+    credentials()
+      .then(creds => {
+        console.log('✅ Credentials verified successfully!');
+        console.log(`Access key ID starts with: ${creds.accessKeyId.substring(0, 4)}...`); 
+        console.log(`Secret key exists: ${!!creds.secretAccessKey}`);
+        console.log(`Session token exists: ${!!creds.sessionToken}`);
+      })
+      .catch(err => {
+        console.error('❌ Failed to verify credentials:', err);
+      });
+  }
+  
+  // Create client config based on credential strategy
+  const clientConfig = {
+    region: 'us-east-1' // HARDCODED - Nova Sonic only available in us-east-1
+  };
+  
+  // Only add credentials if using profile (not needed for env vars)
+  if (!HAS_ENV_CREDENTIALS && credentials) {
+    clientConfig.credentials = credentials;
+  }
   
   bedrockClient = new NovaSonicBidirectionalStreamClient({
     requestHandlerConfig: {
@@ -132,10 +175,7 @@ try {
       requestTimeout: 300000, // 5 minutes
       connectionTimeout: 300000 // 5 minutes
     },
-    clientConfig: {
-      region: AWS_REGION,
-      credentials: fromIni({ profile: AWS_PROFILE_NAME })
-    }
+    clientConfig: clientConfig
   });
   
   // Log available methods for debugging
@@ -221,18 +261,32 @@ io.on('connection', (socket) => {
   
   // Create a unique session ID for this client
   const sessionId = socket.id;
+  console.log(`Creating session with ID: ${sessionId}, socket ID: ${socket.id}`);
+  
+  // Track all active sessions for debugging
+  if (!global.activeSessions) {
+    global.activeSessions = new Map();
+  }
+  global.activeSessions.set(sessionId, { createdAt: new Date(), socketId: socket.id });
+  console.log(`Active sessions: ${global.activeSessions.size}`);
+  global.activeSessions.forEach((session, id) => {
+    console.log(`  - Session ${id}: created at ${session.createdAt}, socket ID: ${session.socketId}`);
+  });
+  
+  // Declare session variable at a higher scope so it can be modified later
+  let streamSession;
 
   try {
     console.log(`Creating stream session for: ${sessionId}`);
     // Create session with the Nova Sonic client
-    const session = bedrockClient.createStreamSession(sessionId);
+    streamSession = bedrockClient.createStreamSession(sessionId);
     console.log(`Stream session created for: ${sessionId}`);
     
     // Initiate the session immediately like in the working example
     try {
-      // This is commented out to match the working example - we'll set up the bidirectional stream when client requests it
-      // bedrockClient.initiateSession(sessionId);
-      console.log(`Session ready for client initialization: ${sessionId}`);
+      // Uncommented - immediately initiate the session like in the working example
+      bedrockClient.initiateSession(sessionId);
+      console.log(`Session bidirectional stream initiated for: ${sessionId}`);
     } catch (err) {
       console.error(`Error initiating session: ${err.message}`);
     }
@@ -244,42 +298,42 @@ io.on('connection', (socket) => {
     }, 60000);
 
     // Set up event handlers
-    session.onEvent('contentStart', (data) => {
+    streamSession.onEvent('contentStart', (data) => {
       console.log('contentStart:', data);
       socket.emit('contentStart', data);
     });
 
-    session.onEvent('textOutput', (data) => {
+    streamSession.onEvent('textOutput', (data) => {
       console.log('Text output:', data);
       socket.emit('textOutput', data);
     });
 
-    session.onEvent('audioOutput', (data) => {
+    streamSession.onEvent('audioOutput', (data) => {
       console.log('Audio output received, sending to client');
       socket.emit('audioOutput', data);
     });
 
-    session.onEvent('error', (data) => {
+    streamSession.onEvent('error', (data) => {
       console.error('Error in session:', data);
       socket.emit('error', data);
     });
 
-    session.onEvent('toolUse', (data) => {
+    streamSession.onEvent('toolUse', (data) => {
       console.log('Tool use detected:', data.toolName);
       socket.emit('toolUse', data);
     });
 
-    session.onEvent('toolResult', (data) => {
+    streamSession.onEvent('toolResult', (data) => {
       console.log('Tool result received');
       socket.emit('toolResult', data);
     });
 
-    session.onEvent('contentEnd', (data) => {
+    streamSession.onEvent('contentEnd', (data) => {
       console.log('Content end received: ', data);
       socket.emit('contentEnd', data);
     });
 
-    session.onEvent('streamComplete', () => {
+    streamSession.onEvent('streamComplete', () => {
       console.log('Stream completed for client:', socket.id);
       socket.emit('streamComplete');
     });
@@ -315,7 +369,7 @@ io.on('connection', (socket) => {
         }
 
         // Stream the audio
-        await session.streamAudio(audioBuffer);
+        await streamSession.streamAudio(audioBuffer);
 
       } catch (error) {
         console.error('Error processing audio:', error);
@@ -330,6 +384,85 @@ io.on('connection', (socket) => {
     socket.on('initSession', async (data, acknowledge) => {
       try {
         console.log(`==== INITIALIZING FULL SESSION SEQUENCE FOR ${sessionId} ====`);
+        
+        // Close any existing session gracefully
+        if (bedrockClient.isSessionActive(sessionId)) {
+          try {
+            console.log(`Closing existing session ${sessionId} cleanly before recreating`); 
+            // Close contents, prompts, session in order
+            try { await session.endAudioContent(); } catch (e) { console.log('No audio to close'); }
+            try { await session.endPrompt(); } catch (e) { console.log('No prompt to close'); }
+            try { await session.close(); } catch (e) { console.log('Error closing session:', e.message); }
+          } catch (cleanErr) {
+            console.warn(`Error during clean session close: ${cleanErr.message}`);
+          }
+          
+          // Force close if needed
+          try {
+            bedrockClient.forceCloseSession(sessionId);
+          } catch (forceErr) {
+            console.warn(`Error force closing session: ${forceErr.message}`);
+          }
+        }
+        
+        // Create a fresh session
+        console.log(`Creating new clean session for: ${sessionId}`);
+        try {
+          // Create a new session
+          const newSession = bedrockClient.createStreamSession(sessionId);
+          console.log(`Created fresh stream session for: ${sessionId}`);
+          
+          // Register event handlers for the new session
+          newSession.onEvent('contentStart', (data) => {
+            console.log('contentStart:', data);
+            socket.emit('contentStart', data);
+          });
+          
+          newSession.onEvent('textOutput', (data) => {
+            console.log('Text output:', data);
+            socket.emit('textOutput', data);
+          });
+          
+          newSession.onEvent('audioOutput', (data) => {
+            console.log('Audio output received, sending to client');
+            socket.emit('audioOutput', data);
+          });
+          
+          newSession.onEvent('error', (data) => {
+            console.error('Error in session:', data);
+            socket.emit('error', data);
+          });
+          
+          newSession.onEvent('toolUse', (data) => {
+            console.log('Tool use detected:', data.toolName);
+            socket.emit('toolUse', data);
+          });
+          
+          newSession.onEvent('toolResult', (data) => {
+            console.log('Tool result received');
+            socket.emit('toolResult', data);
+          });
+          
+          newSession.onEvent('contentEnd', (data) => {
+            console.log('Content end received: ', data);
+            socket.emit('contentEnd', data);
+          });
+          
+          newSession.onEvent('streamComplete', () => {
+            console.log('Stream completed for client:', socket.id);
+            socket.emit('streamComplete');
+          });
+          
+          // Use the newly created session
+          session = newSession;
+        } catch (recErr) {
+          console.error('Error recreating session:', recErr);
+          socket.emit('error', { 
+            message: 'Failed to create bidirectional stream', 
+            details: `Session ${sessionId} could not be created: ${recErr.message}` 
+          });
+          return;
+        }
         
         // Acknowledge receipt of the event if the client provided a callback
         if (typeof acknowledge === 'function') {
@@ -392,7 +525,7 @@ io.on('connection', (socket) => {
         // Setup required sequence for Nova Sonic
         console.log('3. Setting up promptStart event');
         try {
-          await session.setupPromptStart();
+          await streamSession.setupPromptStart();
           console.log('   promptStart event setup complete');
         } catch (err) {
           console.error('Error setting up promptStart:', err);
@@ -406,7 +539,7 @@ io.on('connection', (socket) => {
         // Use custom prompt if provided, otherwise use default
         console.log('4. Setting up systemPrompt:', systemPrompt.substring(0, 50) + '...');
         try {
-          await session.setupSystemPrompt(undefined, systemPrompt);
+          await streamSession.setupSystemPrompt(undefined, systemPrompt);
           console.log('   systemPrompt setup complete');
         } catch (err) {
           console.error('Error setting up systemPrompt:', err);
@@ -420,7 +553,7 @@ io.on('connection', (socket) => {
         // Setup audio content to receive user's speech
         console.log('5. Setting up audioStart event');
         try {
-          await session.setupStartAudio();
+          await streamSession.setupStartAudioEvent();
           console.log('   audioStart event setup complete');
         } catch (err) {
           console.error('Error setting up audioStart:', err);
@@ -455,7 +588,7 @@ io.on('connection', (socket) => {
     socket.on('promptStart', async () => {
       try {
         console.log('Prompt start received');
-        await session.setupPromptStart();
+        await streamSession.setupPromptStart();
       } catch (error) {
         console.error('Error processing prompt start:', error);
         socket.emit('error', {
@@ -468,7 +601,7 @@ io.on('connection', (socket) => {
     socket.on('systemPrompt', async (data) => {
       try {
         console.log('System prompt received', data);
-        await session.setupSystemPrompt(undefined, data);
+        await streamSession.setupSystemPrompt(undefined, data);
       } catch (error) {
         console.error('Error processing system prompt:', error);
         socket.emit('error', {
@@ -481,7 +614,7 @@ io.on('connection', (socket) => {
     socket.on('audioStart', async (data) => {
       try {
         console.log('Audio start received', data);
-        await session.setupStartAudio();
+        await streamSession.setupStartAudioEvent();
       } catch (error) {
         console.error('Error processing audio start:', error);
         socket.emit('error', {
@@ -495,13 +628,20 @@ io.on('connection', (socket) => {
       try {
         console.log('Stop audio requested, beginning proper shutdown sequence');
 
-        // Chain the closing sequence
-        await Promise.all([
-          session.endAudioContent()
-            .then(() => session.endPrompt())
-            .then(() => session.close())
-            .then(() => console.log('Session cleanup complete'))
-        ]);
+        // Sequence matters here - must be done in the correct order
+        // First end audio content
+        console.log('1. Ending audio content');
+        await streamSession.endAudioContent();
+        
+        // Then end the prompt
+        console.log('2. Ending prompt');
+        await streamSession.endPrompt();
+        
+        // Finally close the session
+        console.log('3. Closing session');
+        await streamSession.close();
+        
+        console.log('Session cleanup complete');
       } catch (error) {
         console.error('Error processing streaming end events:', error);
         socket.emit('error', {
@@ -523,12 +663,30 @@ io.on('connection', (socket) => {
           // Add explicit timeouts to avoid hanging promises
           const cleanupPromise = Promise.race([
             (async () => {
-              await session.endAudioContent();
-              await session.endPrompt();
-              await session.close();
+              // Must close contents and prompts in correct sequence
+              try {
+                console.log('1. Ending audio content after disconnect');
+                await streamSession.endAudioContent();
+              } catch (e) {
+                console.warn('Error ending audio content:', e.message);
+              }
+              
+              try {
+                console.log('2. Ending all prompts after disconnect');
+                await streamSession.endPrompt();
+              } catch (e) {
+                console.warn('Error ending prompts:', e.message);
+              }
+              
+              try {
+                console.log('3. Closing session after disconnect');
+                await streamSession.close();
+              } catch (e) {
+                console.warn('Error closing session:', e.message);
+              }
             })(),
             new Promise((_, reject) =>
-              setTimeout(() => reject(new Error('Session cleanup timeout')), 3000)
+              setTimeout(() => reject(new Error('Session cleanup timeout')), 5000)
             )
           ]);
 

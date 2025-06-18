@@ -1,0 +1,110 @@
+Enhanced testing of AWS Bedrock access with detailed comparison...
+Test configuration:
+- Region: us-east-1
+- Profile: bedrock-test
+
+1. TESTING WITH WORKING SAMPLE IMPLEMENTATION:
+Working sample client initialized
+Creating test session with working sample code...
+Initializing session with working implementation...
+Setting up initial events for session 8196e683-ce73-43cf-9ee5-2e750e340931...
+Starting bidirectional stream for session 8196e683-ce73-43cf-9ee5-2e750e340931...
+AsyncIterable iterator requested for session 8196e683-ce73-43cf-9ee5-2e750e340931
+Stream established for session 8196e683-ce73-43cf-9ee5-2e750e340931, processing responses...
+[ERROR] Error processing response stream for session 8196e683-ce73-43cf-9ee5-2e750e340931:  ValidationException: Timed out waiting for input events
+[ERROR] Error from working implementation: [object Object]
+Session initialized successfully with working implementation
+Queue contents for session 8196e683-ce73-43cf-9ee5-2e750e340931:
+Queue length: 0
+Setting up prompt start...
+Setting up prompt start event for session 8196e683-ce73-43cf-9ee5-2e750e340931...
+Setting up system prompt...
+Setting up systemPrompt events for session 8196e683-ce73-43cf-9ee5-2e750e340931...
+Setting up audio start...
+Setting up startAudioContent event for session 8196e683-ce73-43cf-9ee5-2e750e340931...
+Using audio content ID: ee467e09-ecbe-4051-b69c-87d66f0fe83d
+Initial events setup complete for session 8196e683-ce73-43cf-9ee5-2e750e340931
+
+Waiting for response...
+Still waiting... (1s)
+Still waiting... (3s)
+Still waiting... (5s)
+Still waiting... (7s)
+Still waiting... (9s)
+
+Working implementation results:
+- Text response received: false
+- Audio response received: false
+Closing working implementation session...
+Session 8196e683-ce73-43cf-9ee5-2e750e340931 closed and removed from active sessions
+Session 8196e683-ce73-43cf-9ee5-2e750e340931 close completed
+Working implementation session closed
+
+2. TESTING WITH OUR IMPLEMENTATION:
+Initializing BedrockRuntimeClient with explicit region: us-east-1
+Our implementation client initialized
+Creating test session with our implementation...
+Initializing session with our implementation...
+=== INITIATING SESSION 40432cbc-f6dc-4cdc-8c92-7ea103c81cb7 ===
+1. Setting up sessionStart event
+Setting up initial events for session 40432cbc-f6dc-4cdc-8c92-7ea103c81cb7...
+Added sessionStart event to queue for session 40432cbc-f6dc-4cdc-8c92-7ea103c81cb7
+2. Starting bidirectional stream for session 40432cbc-f6dc-4cdc-8c92-7ea103c81cb7...
+   Queue length: 1
+AsyncIterable iterator requested for session 40432cbc-f6dc-4cdc-8c92-7ea103c81cb7
+First event for session 40432cbc-f6dc-4cdc-8c92-7ea103c81cb7 is: sessionStart
+3. Stream established for session 40432cbc-f6dc-4cdc-8c92-7ea103c81cb7, processing responses...
+Starting to process response stream for session 40432cbc-f6dc-4cdc-8c92-7ea103c81cb7
+[ERROR] Error processing response stream for session 40432cbc-f6dc-4cdc-8c92-7ea103c81cb7:  ValidationException: Timed out waiting for input events
+[ERROR] Error from our implementation: [object Object]
+Session initialized successfully with our implementation
+Queue contents for session 40432cbc-f6dc-4cdc-8c92-7ea103c81cb7:
+Queue length: 0
+Setting up prompt start...
+Setting up prompt start event for session 40432cbc-f6dc-4cdc-8c92-7ea103c81cb7...
+Setting up system prompt...
+Setting up systemPrompt events for session 40432cbc-f6dc-4cdc-8c92-7ea103c81cb7...
+Setting up audio start...
+Setting up startAudioContent event for session 40432cbc-f6dc-4cdc-8c92-7ea103c81cb7...
+Using audio content ID: 425affa9-6b2c-400c-8e4f-7104114aadc9
+Initial events setup complete for session 40432cbc-f6dc-4cdc-8c92-7ea103c81cb7
+
+Waiting for response...
+Still waiting... (1s)
+Still waiting... (3s)
+Still waiting... (5s)
+Still waiting... (7s)
+Still waiting... (9s)
+
+Our implementation results:
+- Text response received: false
+- Audio response received: false
+Closing our implementation session...
+Session 40432cbc-f6dc-4cdc-8c92-7ea103c81cb7 closed and removed from active sessions
+Session 40432cbc-f6dc-4cdc-8c92-7ea103c81cb7 close completed
+Our implementation session closed
+
+IMPLEMENTATION COMPARISON SUMMARY:
+Working implementation:
+- Text response received: false
+- Audio response received: false
+
+Our implementation:
+- Text response received: false
+- Audio response received: false
+
+3. TESTING DIRECT BEDROCK API CALL:
+Direct Bedrock client initialized
+Sending direct request to Bedrock Nova Sonic...
+Received direct response from Bedrock. Processing...
+[ERROR] Error with direct API call: ValidationException: RequestId=6ff786d2-bee1-4813-961e-4b8cbcc2ab49 : Error(s):
+Error 1 : AudioOutputConfiguration must be set
+
+
+All tests completed
+
+==========
+SUMMARY:
+
+1. Working implementation: FAILED
+[ERROR] Error testing Bedrock access: ReferenceError: ourReceivedTextResponse is not defined

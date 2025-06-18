@@ -191,6 +191,15 @@ const SpeechInteraction = ({ object }) => {
       console.log("Is connected:", isConnected);
       console.log("Is ready:", isReady);
       
+      // First stop any previous session to ensure clean state
+      try {
+        client.stopListening();
+        // Allow time for cleanup
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      } catch (stopErr) {
+        console.log("No active session to stop or error stopping:", stopErr);
+      }
+      
       // Start streaming with the object-specific prompt
       console.log("Calling client.startListening with prompt");
       await client.startListening(object.prompt);

@@ -158,21 +158,53 @@ class NovaSonicBidirectionalStreamClient {
     });
 
     if (!config.clientConfig.credentials) {
+      console.error("No credentials provided in config");
       throw new Error("No credentials provided");
     }
-
-    // Specifically use us-east-1 for Nova Sonic model availability
-    const region = "us-east-1";
-    console.log(`Initializing BedrockRuntimeClient with region: ${region}`);
     
-    this.bedrockRuntimeClient = new BedrockRuntimeClient({
-      ...config.clientConfig,
-      credentials: config.clientConfig.credentials,
-      region: region, // Force us-east-1 where Bedrock has Nova Sonic available
-      requestHandler: nodeHttp2Handler
-    });
+    // Log credentials info for debugging
+    console.log('Credentials provider type:', typeof config.clientConfig.credentials);
+    try {
+      // Force credentials to resolve synchronously if possible
+      if (typeof config.clientConfig.credentials === 'function') {
+        console.log('Attempting to resolve credentials provider...');
+        config.clientConfig.credentials()
+          .then(creds => {
+            console.log('Credentials resolved successfully!');
+            console.log('Access Key ID starts with:', creds.accessKeyId.substring(0, 4) + '...');
+            console.log('Has secret key:', !!creds.secretAccessKey);
+          })
+          .catch(err => {
+            console.error('Failed to resolve credentials:', err);
+          });
+      }
+    } catch (e) {
+      console.error('Error checking credentials:', e);
+    }
 
-    this.inferenceConfig = config.inferenceConfig ?? DefaultInferenceConfiguration;
+    // Always use us-east-1 for Nova Sonic model availability, regardless of environment setting
+    const region = "us-east-1";
+    console.log(`Initializing BedrockRuntimeClient with explicit region: ${region}`);
+    
+    try {
+      console.log('Creating BedrockRuntimeClient with region us-east-1');
+      this.bedrockRuntimeClient = new BedrockRuntimeClient({
+        ...config.clientConfig,
+        credentials: config.clientConfig.credentials,
+        region: "us-east-1", // Force us-east-1 where Bedrock has Nova Sonic available, hardcoded
+        requestHandler: nodeHttp2Handler
+      });
+      console.log('BedrockRuntimeClient created successfully');
+    } catch (err) {
+      console.error('Error creating BedrockRuntimeClient:', err);
+      throw err;
+    }
+
+    this.inferenceConfig = config.inferenceConfig ?? {
+      maxTokens: 1024,
+      topP: 0.9,
+      temperature: 0.7,
+    };
 
     this.activeSessions = new Map();
     this.sessionLastActivity = new Map();
@@ -202,8 +234,19 @@ class NovaSonicBidirectionalStreamClient {
 
   // Create a new streaming session
   createStreamSession(sessionId = randomUUID(), config) {
+    // If a session with this ID already exists, close it properly first
     if (this.activeSessions.has(sessionId)) {
-      throw new Error(`Stream session with ID ${sessionId} already exists`);
+      console.warn(`Stream session with ID ${sessionId} already exists. Cleaning up old session.`);
+      try {
+        const oldSession = this.activeSessions.get(sessionId);
+        // Mark as inactive so queue processing stops
+        oldSession.isActive = false;
+        // Remove from active sessions map
+        this.activeSessions.delete(sessionId);
+        console.log(`Old session ${sessionId} cleaned up, creating new one`);
+      } catch (err) {
+        console.error(`Error cleaning up old session ${sessionId}:`, err);
+      }
     }
 
     const session = {
@@ -325,8 +368,11 @@ class NovaSonicBidirectionalStreamClient {
       console.log(`=== INITIATING SESSION ${sessionId} ===`);
       console.log(`1. Setting up sessionStart event`);
       
+      // Reset the queue to ensure we start fresh
+      session.queue = [];
+      
       // Set up initial events for this session
-      // This will clear the queue and add the sessionStart event as the first event
+      // This will add the sessionStart event as the first event
       this.setupSessionStartEvent(sessionId);
       
       // Wait a moment to ensure events are properly queued
@@ -344,20 +390,109 @@ class NovaSonicBidirectionalStreamClient {
         this.setupSessionStartEvent(sessionId);
         await new Promise(resolve => setTimeout(resolve, 500));
       }
+      
+      // Verify credentials before making the API call
+      try {
+        console.log('Verifying credentials before API call');
+        if (typeof this.bedrockRuntimeClient.config.credentials === 'function') {
+          const creds = await this.bedrockRuntimeClient.config.credentials();
+          console.log('Credentials verified before API call:',
+            creds ? `AccessKeyId: ${creds.accessKeyId.substring(0, 4)}...` : 'No credentials');
+        }
+      } catch (credError) {
+        console.error('Error verifying credentials before API call:', credError);
+      }
 
-      const response = await this.bedrockRuntimeClient.send(
-        new InvokeModelWithBidirectionalStreamCommand({
-          modelId: "amazon.nova-sonic-v1:0",
-          contentType: "application/json",
-          accept: "application/json",
-          body: asyncIterable,
-        })
-      );
-
-      console.log(`3. Stream established for session ${sessionId}, processing responses...`);
-
-      // Process responses for this session
-      await this.processResponseStream(sessionId, response);
+      console.log('Sending InvokeModelWithBidirectionalStreamCommand with modelId amazon.nova-sonic-v1:0');
+      
+      // Start with a clean queue
+      session.queue = [];
+      
+      // Clear any tracking state
+      session.activePromptIds = new Set();
+      session.activeContentIds = new Map();
+      session.isPromptStartSent = false;
+      session.isAudioContentStartSent = false;
+      
+      console.log('Adding a complete sequence of required events');
+      
+      // 1. First add the session start event - required
+      this.setupSessionStartEvent(sessionId);
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      // 2. Then add the prompt start event - required
+      console.log('Adding promptStart event');
+      await this.setupPromptStartEvent(sessionId);
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      // 3. Add the system prompt - required
+      console.log('Adding system prompt event');
+      await this.setupSystemPromptEvent(sessionId);
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      // 4. Add audio content start - REQUIRED by the API
+      console.log('Adding audio content start event');
+      await this.setupStartAudioEvent(sessionId);
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      console.log(`Queue now has ${session.queue.length} events - minimum required sequence established`);
+      
+      // Wait to ensure events are properly queued
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      const command = new InvokeModelWithBidirectionalStreamCommand({
+        modelId: "amazon.nova-sonic-v1:0",
+        contentType: "application/json",
+        accept: "application/json",
+        body: asyncIterable,
+      });
+      
+      let response;
+      try {
+        // Add a timeout to the AWS call to avoid hanging
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('AWS API call timeout after 30 seconds')), 30000);
+        });
+        
+        // Race between the actual API call and our timeout
+        response = await Promise.race([
+          this.bedrockRuntimeClient.send(command),
+          timeoutPromise
+        ]);
+        
+        console.log('API call successful!');
+        console.log(`3. Stream established for session ${sessionId}, processing responses...`);
+        
+        // Process responses for this session
+        await this.processResponseStream(sessionId, response);
+        
+        // If we get here successfully, ensure all prompts are properly closed at the end
+        if (session.isActive && session.activePromptIds && session.activePromptIds.size > 0) {
+          console.log(`Stream completed, closing ${session.activePromptIds.size} active prompts`);
+          await this.sendPromptEnd(sessionId);
+        }
+      } catch (apiError) {
+        console.error('Error in API call:', apiError);
+        console.error('Error name:', apiError.name);
+        console.error('Error code:', apiError.code);
+        console.error('Error message:', apiError.message);
+        if (apiError.$metadata) {
+          console.error('Error metadata:', JSON.stringify(apiError.$metadata));
+        }
+        
+        // Clean up the session on error
+        console.log(`Cleaning up session ${sessionId} after API error`);
+        session.isActive = false;
+        
+        // Dispatch an error event to notify clients
+        this.dispatchEvent(sessionId, 'error', {
+          source: 'bidirectionalStream',
+          message: apiError.message || 'API error occurred',
+          details: apiError.name || 'Unknown error'
+        });
+        
+        throw apiError;
+      }
 
     } catch (error) {
       console.error(`Error in session ${sessionId}: `, error);
@@ -414,6 +549,12 @@ class NovaSonicBidirectionalStreamClient {
     if (!session) {
       throw new Error(`Cannot create async iterable: Session ${sessionId} not found`);
     }
+    
+    // Verify the session has necessary events in queue
+    if (session.queue.length === 0) {
+      console.warn(`Session ${sessionId} has empty queue when creating async iterator. Adding sessionStart.`);
+      this.setupSessionStartEvent(sessionId);
+    }
 
     let eventCount = 0;
 
@@ -445,13 +586,22 @@ class NovaSonicBidirectionalStreamClient {
               
               // Wait for items in the queue or close signal
               if (session.queue.length === 0) {
+                console.log(`Queue empty for session ${sessionId}, waiting for items...`);
                 try {
+                  // Set a timeout for waiting on queue items
+                  const timeoutPromise = new Promise((_, reject) => {
+                    setTimeout(() => reject(new Error("Timeout waiting for queue items")), 10000);
+                  });
+                  
                   await Promise.race([
                     firstValueFrom(session.queueSignal.pipe(take(1))),
                     firstValueFrom(session.closeSignal.pipe(take(1))).then(() => {
                       throw new Error("Stream closed");
-                    })
+                    }),
+                    timeoutPromise
                   ]);
+                  
+                  console.log(`Received signal for session ${sessionId}, queue now has ${session.queue.length} items`);
                 } catch (error) {
                   if (error instanceof Error) {
                     if (error.message === "Stream closed" || !session.isActive) {
@@ -527,10 +677,23 @@ class NovaSonicBidirectionalStreamClient {
       console.log(`Starting to process response stream for session ${sessionId}`);
       let eventCount = 0;
       
+      // Add a timeout safety mechanism
+      const timeout = setTimeout(() => {
+        if (eventCount === 0) {
+          console.warn(`No events received after 10 seconds for session ${sessionId}, may be inactive`);
+          this.dispatchEvent(sessionId, 'warning', {
+            source: 'responseStream',
+            message: 'No events received after timeout period',
+            details: 'The connection may be stalled'
+          });
+        }
+      }, 10000); // 10 second timeout
+      
       for await (const event of response.body) {
         eventCount++;
         if (eventCount === 1) {
           console.log(`First response event received for session ${sessionId}`);
+          clearTimeout(timeout); // Clear timeout once we get first event
         }
         
         if (!session.isActive) {
@@ -639,7 +802,17 @@ class NovaSonicBidirectionalStreamClient {
 
     this.updateSessionActivity(sessionId);
     session.queue.push(event);
-    session.queueSignal.next();
+    
+    // Log queue state after adding event
+    const eventType = event.event ? Object.keys(event.event)[0] : 'unknown';
+    console.log(`Added ${eventType} event to queue for session ${sessionId}. Queue length: ${session.queue.length}`);
+    
+    // Signal that queue has new data
+    try {
+      session.queueSignal.next(true);
+    } catch (e) {
+      console.error(`Error triggering queueSignal for ${sessionId}:`, e);
+    }
   }
 
   // Set up initial events for a session
@@ -666,12 +839,23 @@ class NovaSonicBidirectionalStreamClient {
     
     // Ensure the event is processed immediately
     console.log(`Added sessionStart event to queue for session ${sessionId}`);
+    console.log(`Queue length after adding sessionStart: ${session.queue.length}`);
+    
+    // Trigger the queueSignal to let any waiting iterators know data is available
+    try {
+      if (session.queueSignal) {
+        session.queueSignal.next(true);
+      }
+    } catch (e) {
+      console.error(`Error triggering queueSignal for session ${sessionId}:`, e);
+    }
   }
 
   setupPromptStartEvent(sessionId) {
     console.log(`Setting up prompt start event for session ${sessionId}...`);
     const session = this.activeSessions.get(sessionId);
     if (!session) return;
+    
     // Prompt start event
     this.addEventToSessionQueue(sessionId, {
       event: {
@@ -708,6 +892,14 @@ class NovaSonicBidirectionalStreamClient {
         },
       }
     });
+    
+    // Track this prompt in activePromptIds to ensure it's closed properly
+    if (!session.activePromptIds) {
+      session.activePromptIds = new Set();
+    }
+    session.activePromptIds.add(session.promptName);
+    console.log(`Added promptName ${session.promptName} to active prompts tracking`);
+    
     session.isPromptStartSent = true;
   }
 
@@ -722,6 +914,20 @@ class NovaSonicBidirectionalStreamClient {
     const textPromptID = randomUUID();
     // Store the promptName in the session object for reference
     const systemPromptName = session.promptName;
+    
+    // Make sure we're tracking prompt IDs
+    if (!session.activePromptIds) {
+      session.activePromptIds = new Set();
+    }
+    
+    // Track content IDs to ensure they're properly closed
+    if (!session.activeContentIds) {
+      session.activeContentIds = new Map();
+    }
+    
+    // Store contentId under its promptName for reference
+    session.activeContentIds.set(textPromptID, systemPromptName);
+    
     this.addEventToSessionQueue(sessionId, {
       event: {
         contentStart: {
@@ -755,6 +961,9 @@ class NovaSonicBidirectionalStreamClient {
         },
       }
     });
+    
+    // Remove from tracking since we've closed it
+    session.activeContentIds.delete(textPromptID);
   }
 
   setupStartAudioEvent(
@@ -884,15 +1093,43 @@ class NovaSonicBidirectionalStreamClient {
 
   async sendPromptEnd(sessionId) {
     const session = this.activeSessions.get(sessionId);
-    if (!session || !session.isPromptStartSent) return;
-
-    await this.addEventToSessionQueue(sessionId, {
-      event: {
-        promptEnd: {
-          promptName: session.promptName
-        }
+    if (!session) return;
+    
+    // Check if we have any prompts to close
+    if (!session.isPromptStartSent) {
+      console.log(`No prompt started for session ${sessionId}, skipping promptEnd`);
+      return;
+    }
+    
+    // Send promptEnd event for any tracked prompt IDs
+    if (session.activePromptIds && session.activePromptIds.size > 0) {
+      console.log(`Closing ${session.activePromptIds.size} active prompts for session ${sessionId}`);
+      
+      // Close each prompt that's still active
+      for (const promptName of session.activePromptIds) {
+        console.log(`Sending promptEnd for ${promptName}`);
+        await this.addEventToSessionQueue(sessionId, {
+          event: {
+            promptEnd: {
+              promptName: promptName
+            }
+          }
+        });
       }
-    });
+      
+      // Clear the set of active prompts
+      session.activePromptIds.clear();
+    } else {
+      // Just close the main prompt if no tracking available
+      console.log(`Sending promptEnd for ${session.promptName}`);
+      await this.addEventToSessionQueue(sessionId, {
+        event: {
+          promptEnd: {
+            promptName: session.promptName
+          }
+        }
+      });
+    }
 
     // Wait to ensure it's processed
     await new Promise(resolve => setTimeout(resolve, 300));
