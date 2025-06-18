@@ -64,7 +64,9 @@ export class NovaSonicClient {
         forceNew: true,
         reconnectionAttempts: 5,
         reconnectionDelay: 1000,
-        timeout: 20000, // Increase timeout to 20 seconds
+        timeout: 30000, // Increase timeout to 30 seconds
+        pingTimeout: 60000, // Increase ping timeout to match server
+        pingInterval: 25000, // Increase ping interval to match server
         path: '/socket.io'
       });
       
@@ -276,6 +278,12 @@ export class NovaSonicClient {
       console.log('- Connected:', this.socket.connected);
       console.log('- ID:', this.socket.id);
       console.log('- Transport:', this.socket.io.engine.transport.name);
+
+      // Use the unified initSession approach which is more reliable
+      console.log("Using single initSession event for better reliability");
+      
+      // Send a single event with all the necessary information
+      console.log("Emitting initSession event with prompt");
       
       // Wait for session initialization to complete
       return new Promise((resolve, reject) => {
@@ -290,18 +298,6 @@ export class NovaSonicClient {
         this.socket.once('error', debugHandler('error'));
         this.socket.once('disconnect', debugHandler('disconnect'));
         
-        console.log("Emitting initSession event with prompt:", prompt.substring(0, 50) + "...");
-        
-        // Track if the event was acknowledged
-        let eventSent = this.socket.emit('initSession', { prompt }, (ack) => {
-          if (ack) {
-            console.log('Server acknowledged initSession event:', ack);
-          }
-        });
-        
-        console.log("initSession event sent successfully:", eventSent);
-        console.log("Waiting for sessionInitialized event...");
-        
         // Wait for initialization confirmation
         this.socket.once('sessionInitialized', (data) => {
           console.log('Session initialized successfully:', data);
@@ -314,49 +310,26 @@ export class NovaSonicClient {
           }
         });
         
+        // Also listen for contentStart as an alternative indicator that the session is ready
+        this.socket.once('contentStart', (data) => {
+          console.log('Received contentStart event, considering session initialized:', data);
+          clearTimeout(timeoutId);
+          resolve(true);
+        });
+        
         // Also listen for errors
         this.socket.once('error', (err) => {
           console.error('Error during session initialization:', err);
           clearTimeout(timeoutId); // Clear timeout on error
-          
-          // Check for the specific hasSession error and resend with a delay
-          if (err.details && err.details.includes('hasSession is not a function')) {
-            console.log('Detected server method error, retrying in 1 second...');
-            
-            // Remove the error handler to avoid double rejection
-            this.socket.off('error');
-            
-            setTimeout(() => {
-              console.log('Retrying initSession event...');
-              this.socket.emit('initSession', { prompt }, (ack) => {
-                if (ack) {
-                  console.log('Retry acknowledged by server:', ack);
-                }
-              });
-              
-              // Set up a new handler for the retry
-              this.socket.once('sessionInitialized', (retryData) => {
-                console.log('Session initialized successfully on retry:', retryData);
-                resolve(true);
-              });
-              
-              this.socket.once('error', (retryErr) => {
-                console.error('Error during retry initialization:', retryErr);
-                reject(new Error(`Session initialization error on retry: ${
-                  retryErr.message || JSON.stringify(retryErr)
-                }`));
-              });
-            }, 1000);
-            
-            return;
-          }
-          
           reject(new Error(`Session initialization error: ${err.message || JSON.stringify(err)}`));
         });
         
-        // Set timeout for initialization with a longer timeout
+        // Emit the initSession event
+        this.socket.emit('initSession', { prompt });
+        
+        // Set timeout for initialization with a reasonable timeout
         const timeoutId = setTimeout(() => {
-          console.error('Session initialization timed out after 20 seconds');
+          console.error('Session initialization timed out after 15 seconds');
           console.log('Current socket state:', {
             connected: this.socket.connected,
             id: this.socket.id,
@@ -365,27 +338,11 @@ export class NovaSonicClient {
           
           // Make sure we remove all listeners
           this.socket.off('sessionInitialized');
+          this.socket.off('contentStart');
           this.socket.off('error');
           
-          // Check if we can try a reconnect
-          if (this.socket.connected) {
-            // Try one more time with reconnect request
-            console.log('Attempting emergency reconnect and session initialization...');
-            
-            this.socket.emit('initSession', { prompt }, (ack) => {
-              if (ack) {
-                console.log('Emergency resend acknowledged by server:', ack);
-              }
-            });
-            
-            // Give it 5 more seconds
-            setTimeout(() => {
-              reject(new Error('Session initialization timed out after final retry'));
-            }, 5000);
-          } else {
-            reject(new Error('Session initialization timed out and socket is disconnected'));
-          }
-        }, 20000);
+          reject(new Error('Session initialization timed out'));
+        }, 15000);
       });
     } catch (error) {
       console.error('Failed to initialize session:', error);
@@ -409,13 +366,31 @@ export class NovaSonicClient {
     try {
       // First, make sure the session is initialized
       console.log("Initializing session before starting audio...");
-      const sessionInitialized = await this.initializeSession(customPrompt);
+      
+      // Use a timeout to prevent hanging forever
+      const sessionInitializePromise = this.initializeSession(customPrompt);
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error("Session initialization timed out after 20 seconds")), 20000);
+      });
+      
+      const sessionInitialized = await Promise.race([sessionInitializePromise, timeoutPromise])
+        .catch(error => {
+          console.error("Session initialization failed with error:", error);
+          this.notifyError({
+            message: 'Session initialization timeout or error',
+            details: error.message
+          });
+          return false;
+        });
       
       if (!sessionInitialized) {
         console.error("Session initialization failed, cannot start listening");
         this.notifyStatus('error');
         return;
       }
+      
+      // Wait a moment after session initialization
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
       console.log("Session initialized successfully, setting up audio capture...");
       

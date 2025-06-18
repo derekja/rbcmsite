@@ -14,10 +14,12 @@ echo "Starting Express server on port 3000..."
 
 # Load AWS credentials environment variables
 echo "Loading AWS credentials..."
+# Force these to ensure they are set correctly
 export AWS_REGION=us-east-1
 export AWS_DEFAULT_REGION=us-east-1
 export AWS_PROFILE=bedrock-test
-export NODE_DEBUG=aws
+# Comment out Node debug to reduce noise
+# export NODE_DEBUG=aws
 
 # Start server with detailed logging
 echo "Starting server with AWS profile: $AWS_PROFILE in region: $AWS_REGION"

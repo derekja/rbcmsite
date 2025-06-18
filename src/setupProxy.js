@@ -13,7 +13,17 @@ module.exports = function(app) {
       target: WEBSOCKET_SERVER_URL,
       ws: true, // Enable WebSocket proxying
       changeOrigin: true,
-      logLevel: 'debug' // More verbose logging
+      logLevel: 'debug', // More verbose logging
+      // Add timing options to match server
+      onProxyReq: (proxyReq, req, res) => {
+        // Log proxy requests for debugging
+        console.log(`Proxying request: ${req.method} ${req.url}`);
+      },
+      // WebSocket proxy options
+      websocket: {
+        pingTimeout: 60000, // Match server timeout settings
+        pingInterval: 25000 // Match server interval settings
+      }
     })
   );
   

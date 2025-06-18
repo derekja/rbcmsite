@@ -9,6 +9,7 @@ const { take } = require('rxjs/operators');
 const { firstValueFrom } = require('rxjs');
 const https = require('https');
 const axios = require('axios');
+const { TextEncoder } = require('util'); // Add TextEncoder from node:util
 
 // Import our type constants
 const { 
@@ -325,7 +326,11 @@ class NovaSonicBidirectionalStreamClient {
       console.log(`1. Setting up sessionStart event`);
       
       // Set up initial events for this session
+      // This will clear the queue and add the sessionStart event as the first event
       this.setupSessionStartEvent(sessionId);
+      
+      // Wait a moment to ensure events are properly queued
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
       // Create the bidirectional stream with session-specific async iterator
       const asyncIterable = this.createSessionAsyncIterable(sessionId);
@@ -333,9 +338,18 @@ class NovaSonicBidirectionalStreamClient {
       console.log(`2. Starting bidirectional stream for session ${sessionId}...`);
       console.log(`   Queue length: ${session.queue.length}`);
 
+      // Double check that we have events in the queue
+      if (session.queue.length === 0) {
+        console.warn(`Warning: Queue is empty for session ${sessionId}. Re-adding sessionStart event.`);
+        this.setupSessionStartEvent(sessionId);
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+
       const response = await this.bedrockRuntimeClient.send(
         new InvokeModelWithBidirectionalStreamCommand({
           modelId: "amazon.nova-sonic-v1:0",
+          contentType: "application/json",
+          accept: "application/json",
           body: asyncIterable,
         })
       );
@@ -349,7 +363,8 @@ class NovaSonicBidirectionalStreamClient {
       console.error(`Error in session ${sessionId}: `, error);
       this.dispatchEventForSession(sessionId, 'error', {
         source: 'bidirectionalStream',
-        error
+        message: 'Error processing stream',
+        details: error instanceof Error ? error.message : String(error)
       });
 
       // Make sure to clean up if there's an error
@@ -414,6 +429,20 @@ class NovaSonicBidirectionalStreamClient {
                 console.log(`Iterator closing for session ${sessionId}, done = true`);
                 return { value: undefined, done: true };
               }
+              
+              // Check if queue is empty but we need to make sure SessionStart was sent
+              if (session.queue.length === 0 && eventCount === 0) {
+                console.warn(`Queue is empty and no events sent yet for session ${sessionId}. Checking session start`);
+                // Verify the sessionStart event was added to the queue
+                const needsSessionStart = true;
+                if (needsSessionStart) {
+                  console.log(`Re-adding sessionStart event for session ${sessionId}`);
+                  this.setupSessionStartEvent(sessionId);
+                  // Give a moment for the event to be added to the queue
+                  await new Promise(resolve => setTimeout(resolve, 500));
+                }
+              }
+              
               // Wait for items in the queue or close signal
               if (session.queue.length === 0) {
                 try {
@@ -448,11 +477,20 @@ class NovaSonicBidirectionalStreamClient {
               // Get next item from the session's queue
               const nextEvent = session.queue.shift();
               eventCount++;
+              
+              // Log the first event to make sure it's SessionStart
+              if (eventCount === 1) {
+                const eventType = Object.keys(nextEvent.event || {})[0];
+                console.log(`First event for session ${sessionId} is: ${eventType}`);
+                if (eventType !== 'sessionStart') {
+                  console.error(`ERROR: First event must be sessionStart but got ${eventType}!`);
+                }
+              }
 
               return {
                 value: {
                   chunk: {
-                    bytes: Buffer.from(JSON.stringify(nextEvent))
+                    bytes: new TextEncoder().encode(JSON.stringify(nextEvent))
                   }
                 },
                 done: false
@@ -486,7 +524,15 @@ class NovaSonicBidirectionalStreamClient {
     if (!session) return;
 
     try {
+      console.log(`Starting to process response stream for session ${sessionId}`);
+      let eventCount = 0;
+      
       for await (const event of response.body) {
+        eventCount++;
+        if (eventCount === 1) {
+          console.log(`First response event received for session ${sessionId}`);
+        }
+        
         if (!session.isActive) {
           console.log(`Session ${sessionId} is no longer active, stopping response processing`);
           break;
@@ -602,14 +648,18 @@ class NovaSonicBidirectionalStreamClient {
     const session = this.activeSessions.get(sessionId);
     if (!session) return;
 
-    // Clear any existing queue to ensure clean state
+    // Clear the queue before adding the sessionStart event
     session.queue = [];
 
-    // Session start event
+    // Session start event must always be the first event sent
     this.addEventToSessionQueue(sessionId, {
       event: {
         sessionStart: {
-          inferenceConfiguration: session.inferenceConfig
+          inferenceConfiguration: {
+            maxTokens: 1024,
+            topP: 0.9,
+            temperature: 0.7
+          }
         }
       }
     });
@@ -670,10 +720,12 @@ class NovaSonicBidirectionalStreamClient {
     if (!session) return;
     // Text content start
     const textPromptID = randomUUID();
+    // Store the promptName in the session object for reference
+    const systemPromptName = session.promptName;
     this.addEventToSessionQueue(sessionId, {
       event: {
         contentStart: {
-          promptName: session.promptName,
+          promptName: systemPromptName,
           contentName: textPromptID,
           type: "TEXT",
           interactive: true,
@@ -687,7 +739,7 @@ class NovaSonicBidirectionalStreamClient {
     this.addEventToSessionQueue(sessionId, {
       event: {
         textInput: {
-          promptName: session.promptName,
+          promptName: systemPromptName,
           contentName: textPromptID,
           content: systemPromptContent,
         },
@@ -698,7 +750,7 @@ class NovaSonicBidirectionalStreamClient {
     this.addEventToSessionQueue(sessionId, {
       event: {
         contentEnd: {
-          promptName: session.promptName,
+          promptName: systemPromptName,
           contentName: textPromptID,
         },
       }
@@ -714,11 +766,13 @@ class NovaSonicBidirectionalStreamClient {
     if (!session) return;
 
     console.log(`Using audio content ID: ${session.audioContentId}`);
+    // Use the session's promptName for consistency
+    const audioPromptName = session.promptName;
     // Audio content start
     this.addEventToSessionQueue(sessionId, {
       event: {
         contentStart: {
-          promptName: session.promptName,
+          promptName: audioPromptName,
           contentName: session.audioContentId,
           type: "AUDIO",
           interactive: true,
@@ -740,10 +794,13 @@ class NovaSonicBidirectionalStreamClient {
     // Convert audio to base64
     const base64Data = audioData.toString('base64');
 
+    // Use the session's promptName for consistency
+    const audioPromptName = session.promptName;
+    
     this.addEventToSessionQueue(sessionId, {
       event: {
         audioInput: {
-          promptName: session.promptName,
+          promptName: audioPromptName,
           contentName: session.audioContentId,
           content: base64Data,
         },
@@ -809,10 +866,13 @@ class NovaSonicBidirectionalStreamClient {
     const session = this.activeSessions.get(sessionId);
     if (!session || !session.isAudioContentStartSent) return;
 
+    // Use the session's promptName for consistency
+    const audioPromptName = session.promptName;
+    
     await this.addEventToSessionQueue(sessionId, {
       event: {
         contentEnd: {
-          promptName: session.promptName,
+          promptName: audioPromptName,
           contentName: session.audioContentId,
         }
       }

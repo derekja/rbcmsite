@@ -10,6 +10,12 @@ const dotenv = require('dotenv');
 
 dotenv.config();
 
+// Log AWS configuration for debugging
+console.log('AWS Configuration:');
+console.log('AWS_REGION:', process.env.AWS_REGION);
+console.log('AWS_DEFAULT_REGION:', process.env.AWS_DEFAULT_REGION);
+console.log('AWS_PROFILE:', process.env.AWS_PROFILE);
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -19,7 +25,9 @@ const io = new Server(server, {
     credentials: true,
     allowedHeaders: ["Content-Type"]
   },
-  transports: ['websocket', 'polling']
+  transports: ['websocket', 'polling'],
+  pingTimeout: 60000, // Increase ping timeout to 60 seconds
+  pingInterval: 25000  // Ping interval to 25 seconds
 });
 
 const PORT = process.env.PORT || 3000;
@@ -220,8 +228,14 @@ io.on('connection', (socket) => {
     const session = bedrockClient.createStreamSession(sessionId);
     console.log(`Stream session created for: ${sessionId}`);
     
-    // We'll initiate the session later after setting up event handlers
-    // DON'T call bedrockClient.initiateSession(sessionId) yet
+    // Initiate the session immediately like in the working example
+    try {
+      // This is commented out to match the working example - we'll set up the bidirectional stream when client requests it
+      // bedrockClient.initiateSession(sessionId);
+      console.log(`Session ready for client initialization: ${sessionId}`);
+    } catch (err) {
+      console.error(`Error initiating session: ${err.message}`);
+    }
 
     // Log active connections every minute
     const connectionInterval = setInterval(() => {
@@ -420,11 +434,13 @@ io.on('connection', (socket) => {
         console.log('6. Full initialization sequence complete!');
         
         // Signal client that initialization is complete
-        socket.emit('sessionInitialized', { 
-          success: true,
-          sessionId: sessionId
-        });
-        console.log('Sent sessionInitialized event to client');
+        setTimeout(() => {
+          socket.emit('sessionInitialized', { 
+            success: true,
+            sessionId: sessionId
+          });
+          console.log('Sent sessionInitialized event to client');
+        }, 0); // Use setTimeout to ensure this happens after other events are processed
         
       } catch (error) {
         console.error('Error initializing session sequence:', error);
