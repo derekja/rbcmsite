@@ -23,7 +23,7 @@ export AWS_PROFILE=bedrock-test
 
 # Start server with detailed logging
 echo "Starting server with AWS profile: $AWS_PROFILE in region: $AWS_REGION"
-DEBUG=socket.io*,aws* AWS_SDK_LOAD_CONFIG=1 PORT=3000 node server.js &
+DEBUG=socket.io*,aws* AWS_SDK_LOAD_CONFIG=1 PORT=3000 TS_NODE_PROJECT='./tsconfig.json' npx ts-node src/server.ts &
 SERVER_PID=$!
 
 # Give the server a moment to start
